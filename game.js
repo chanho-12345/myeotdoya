@@ -12,6 +12,11 @@
   var gameId = params.get("token") || "";
   var ownerParam = params.get("owner") || "";
 
+  var KAKAO_JS_KEY = "9571640b8eab8e91dc39c6bc0018e149";
+  try {
+    if (window.Kakao && !window.Kakao.isInitialized()) { window.Kakao.init(KAKAO_JS_KEY); }
+  } catch (e) {}
+
   function escapeHtml(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -128,7 +133,12 @@
       '<p class="footer-note">이 페이지는 나만 볼 수 있는 페이지예요. 이 링크는 저장해두고, 친구들에겐 위의 공유 링크만 보내주세요.</p>';
     playStageAnim();
 
-    bindCopyButton(shareUrl);
+    var copyBtn = document.getElementById("copyBtn");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", function () {
+        openShareSheet(shareUrl, data.creatorNickname + "가 나를 얼마나 아는지 테스트해봐!");
+      });
+    }
   }
 
   // ---------- 응답자: 인트로 / 질문 ----------
@@ -590,20 +600,86 @@
     return '<div class="lb-list">' + rows + "</div>";
   }
 
-  function bindCopyButton(shareUrl) {
-    var btn = document.getElementById("copyBtn");
-    if (!btn) return;
-    btn.addEventListener("click", function () {
-      function fallbackCopy() {
-        var input = document.getElementById("shareUrlInput");
-        if (input) { input.select(); try { document.execCommand("copy"); } catch (e) {} }
-        showToast("링크가 복사됐어요!");
+  function copyLink(url) {
+    function fallbackCopy() {
+      var tmp = document.createElement("textarea");
+      tmp.value = url;
+      tmp.style.position = "fixed";
+      tmp.style.opacity = "0";
+      document.body.appendChild(tmp);
+      tmp.select();
+      try { document.execCommand("copy"); } catch (e) {}
+      tmp.remove();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).catch(fallbackCopy);
+    } else {
+      fallbackCopy();
+    }
+  }
+
+  function shareViaKakao(shareUrl, shareText) {
+    try {
+      if (window.Kakao && window.Kakao.isInitialized() && window.Kakao.Share) {
+        window.Kakao.Share.sendDefault({
+          objectType: "text",
+          text: shareText,
+          link: { mobileWebUrl: shareUrl, webUrl: shareUrl },
+        });
+        return;
       }
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(shareUrl).then(function () { showToast("링크가 복사됐어요!"); }, fallbackCopy);
-      } else {
-        fallbackCopy();
-      }
+    } catch (e) {}
+    // 카카오 SDK가 없거나 실패하면 링크 복사로 대체
+    copyLink(shareUrl);
+    showToast("링크가 복사됐어요. 카카오톡에서 붙여넣어 보내주세요!");
+  }
+
+  // 링크를 그냥 복사만 하는 대신, "어디로 보낼지" 고르는 공유 시트를 띄움 (LOVE DNA와 동일한 방식).
+  function openShareSheet(shareUrl, shareText) {
+    var old = document.getElementById("shareSheetOverlay");
+    if (old) old.remove();
+
+    var overlay = document.createElement("div");
+    overlay.className = "share-sheet-overlay";
+    overlay.id = "shareSheetOverlay";
+    overlay.innerHTML =
+      '<div class="share-sheet">' +
+      '<div class="share-sheet-title">친구에게 보내기</div>' +
+      '<div class="share-sheet-grid">' +
+      '<button class="share-sheet-item" data-action="kakao"><span class="share-sheet-ico ico-kakao" style="font-size:16px;font-weight:800;">톡</span><span class="share-sheet-label">카카오톡</span></button>' +
+      '<button class="share-sheet-item" data-action="sms"><span class="share-sheet-ico ico-sms" style="font-size:16px;font-weight:800;">문자</span><span class="share-sheet-label">문자</span></button>' +
+      '<button class="share-sheet-item" data-action="fb"><span class="share-sheet-ico ico-fb" style="font-size:18px;font-weight:800;">f</span><span class="share-sheet-label">페이스북</span></button>' +
+      '<button class="share-sheet-item" data-action="copy"><span class="share-sheet-ico ico-copy" style="font-size:16px;font-weight:800;">복사</span><span class="share-sheet-label">링크 복사</span></button>' +
+      "</div>" +
+      '<button class="btn btn-ghost share-sheet-cancel" id="shareSheetCancel">닫기</button>' +
+      "</div>";
+    document.body.appendChild(overlay);
+    requestAnimationFrame(function () { overlay.classList.add("show"); });
+
+    function close() {
+      overlay.classList.remove("show");
+      setTimeout(function () { overlay.remove(); }, 220);
+    }
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
+    document.getElementById("shareSheetCancel").addEventListener("click", close);
+
+    Array.prototype.forEach.call(overlay.querySelectorAll(".share-sheet-item"), function (btn) {
+      btn.addEventListener("click", function () {
+        var action = btn.getAttribute("data-action");
+        if (action === "kakao") {
+          shareViaKakao(shareUrl, shareText);
+        } else if (action === "sms") {
+          var body = encodeURIComponent(shareText + " " + shareUrl);
+          var isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+          window.location.href = isIOS ? ("sms:&body=" + body) : ("sms:?body=" + body);
+        } else if (action === "fb") {
+          window.open("https://www.facebook.com/sharer/sharer.php?u=" + encodeURIComponent(shareUrl), "_blank", "noopener,width=600,height=520");
+        } else if (action === "copy") {
+          copyLink(shareUrl);
+          showToast("링크가 복사됐어요!");
+        }
+        close();
+      });
     });
   }
 
