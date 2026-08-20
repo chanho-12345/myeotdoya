@@ -6,6 +6,8 @@
   var progressFill = document.getElementById("progressFill");
   var progressLabel = document.getElementById("progressLabel");
 
+  var TOTAL_STEPS = 10; // 객관식 9 + 주관식 1
+
   var params = new URLSearchParams(location.search);
   var gameId = params.get("token") || "";
   var ownerParam = params.get("owner") || "";
@@ -28,6 +30,10 @@
   }
   var clientId = getClientId();
 
+  function track(name) {
+    try { if (window.va) window.va("event", { name: name }); } catch (e) {}
+  }
+
   function renderError(msg) {
     progressWrap.style.display = "none";
     stageEl.innerHTML =
@@ -46,6 +52,7 @@
       return r.json();
     })
     .then(function (data) {
+      track("game_open");
       if (data.isOwner) {
         renderOwnerView(data);
       } else if (data.alreadyResponded) {
@@ -67,10 +74,10 @@
     var miscountHtml = "";
     if (data.miscount && data.miscount.length) {
       miscountHtml =
-        '<div class="section-title">🔍 친구들이 가장 헷갈린 내 모습</div>' +
+        '<div class="section-title">친구들이 가장 헷갈린 내 모습</div>' +
         '<ul class="feature-list">' +
         data.miscount.map(function (m) {
-          return '<li><span class="ico">❓</span>[' + escapeHtml(m.category) + "] " + escapeHtml(m.text) + " — " + m.missCount + "명이 틀렸어요</li>";
+          return "<li><span class=\"ico\">·</span>[" + escapeHtml(m.category) + "] " + escapeHtml(m.text) + " — " + m.missCount + "명이 틀렸어요</li>";
         }).join("") +
         "</ul>";
     } else if (data.attemptCount > 0) {
@@ -78,12 +85,11 @@
     }
 
     stageEl.innerHTML =
-      '<div style="text-align:center;font-size:40px;">👑</div>' +
-      '<div class="q-text" style="text-align:center;">' + escapeHtml(data.creatorNickname) + "님의 게임</div>" +
+      '<div class="q-text" style="text-align:center;">' + escapeHtml(data.creatorNickname) + "의 테스트</div>" +
       '<p class="banner">' + (data.attemptCount > 0 ? "지금까지 " + data.attemptCount + "명이 참여했어요." : escapeHtml(tierMsg)) + "</p>" +
       '<div class="field"><input id="shareUrlInput" type="text" readonly value="' + escapeHtml(shareUrl) + '"/></div>' +
       '<button class="btn btn-primary" id="copyBtn">공유 링크 복사하기</button>' +
-      (data.ranking && data.ranking.length ? '<div class="section-title">🏆 랭킹</div>' + rankingHtml(data.ranking) : "") +
+      (data.ranking && data.ranking.length ? '<div class="section-title">' + escapeHtml(data.creatorNickname) + '를 제일 잘 아는 사람</div>' + rankingHtml(data.ranking) : "") +
       miscountHtml +
       '<p class="footer-note">이 페이지는 나만 볼 수 있는 페이지예요. 이 링크는 저장해두고, 친구들에겐 위의 공유 링크만 보내주세요.</p>';
 
@@ -93,14 +99,19 @@
   // ---------- 응답자: 인트로 / 질문 ----------
   var respondentNickname = "";
   var guesses = [];
+  var confidence = [];
+  var subjectiveGuess = "";
+
+  var DEEP_CONFIDENCE_LABEL = { guess: "그냥 느낌", half: "반반", sure: "이건 확실함" };
 
   function renderIntro(data) {
     progressWrap.style.display = "none";
     guesses = new Array(data.questions.length).fill(null);
+    confidence = new Array(data.questions.length).fill(null);
+    subjectiveGuess = "";
     stageEl.innerHTML =
-      '<div style="text-align:center;font-size:40px;">🔥</div>' +
-      '<div class="q-text" style="text-align:center;">' + escapeHtml(data.creatorNickname) + "님이<br/>도전장을 보냈어요!</div>" +
-      '<p style="font-size:14px;color:var(--ink-2);text-align:center;line-height:1.6;">10문제 · 약 1분<br/>&quot;' + escapeHtml(data.creatorNickname) + '님이라면 이걸 골랐을까?&quot;를 맞혀보세요.</p>' +
+      '<div class="q-text" style="text-align:center;">' + escapeHtml(data.creatorNickname) + "를<br/>얼마나 잘 알고 있어?</div>" +
+      '<p style="font-size:14px;color:var(--ink-2);text-align:center;line-height:1.6;">10개의 질문.<br/>마지막 한 문제는 찍을 수도 없어요.</p>' +
       '<div class="field"><label>닉네임 (랭킹에 그대로 보여요)</label><input id="nickInput" type="text" maxlength="12" placeholder="예: 지수"/></div>' +
       '<button class="btn btn-primary" id="startBtn">시작하기 →</button>';
 
@@ -110,6 +121,7 @@
       var v = input.value.trim();
       if (!v) { input.focus(); return; }
       respondentNickname = v.slice(0, 12);
+      track("game_start");
       renderQuestion(data, 0);
     }
     document.getElementById("startBtn").addEventListener("click", go);
@@ -119,9 +131,10 @@
   function renderQuestion(data, idx) {
     var questions = data.questions;
     progressWrap.style.display = "block";
-    progressFill.style.width = Math.round(((idx + 1) / questions.length) * 100) + "%";
-    progressLabel.textContent = (idx + 1) + " / " + questions.length;
+    progressFill.style.width = Math.round(((idx + 1) / TOTAL_STEPS) * 100) + "%";
+    progressLabel.textContent = (idx + 1) + " / " + TOTAL_STEPS;
     var q = questions[idx];
+    var banner = GameCore.depthBannerForIndex(idx);
     var backHtml = idx === 0
       ? '<div class="q-top-row"><span></span></div>'
       : '<div class="q-top-row"><button class="q-back-btn" id="backBtn">← 이전</button></div>';
@@ -131,8 +144,9 @@
     }).join("");
     stageEl.innerHTML =
       backHtml +
-      '<div class="q-index">Q' + (idx + 1) + ". " + escapeHtml(q.category) + "</div>" +
-      '<div class="q-text">' + escapeHtml(data.creatorNickname) + "님이라면?<br/>" + escapeHtml(q.text) + "</div>" +
+      (banner ? '<p class="banner" style="margin-bottom:14px;">' + escapeHtml(banner) + "</p>" : "") +
+      '<div class="q-index">Q' + (idx + 1) + "</div>" +
+      '<div class="q-text">' + escapeHtml(data.creatorNickname) + "라면?<br/>" + escapeHtml(q.text) + "</div>" +
       '<div class="opt-list">' + optsHtml + "</div>";
 
     var backBtn = document.getElementById("backBtn");
@@ -148,14 +162,68 @@
         Array.prototype.forEach.call(stageEl.querySelectorAll(".opt"), function (b) { b.classList.remove("selected"); });
         btn.classList.add("selected");
         setTimeout(function () {
-          if (idx + 1 < questions.length) {
-            renderQuestion(data, idx + 1);
+          if (q.depth === "deep") {
+            renderConfidence(data, idx);
           } else {
-            submitAttempt(data);
+            advanceFrom(data, idx);
           }
         }, 220);
       });
     });
+  }
+
+  function renderConfidence(data, idx) {
+    var q = data.questions[idx];
+    stageEl.innerHTML =
+      '<div class="q-index">Q' + (idx + 1) + "</div>" +
+      '<div class="q-text">' + escapeHtml(q.text) + "</div>" +
+      '<p style="font-size:14px;font-weight:800;color:var(--ink);margin:14px 0 12px;">이 답, 얼마나 확신해?</p>' +
+      '<div class="pill-group" id="confPills">' +
+      ["guess", "half", "sure"].map(function (v) {
+        return '<button class="pill" data-v="' + v + '">' + DEEP_CONFIDENCE_LABEL[v] + "</button>";
+      }).join("") +
+      "</div>";
+
+    Array.prototype.forEach.call(stageEl.querySelectorAll(".pill"), function (btn) {
+      btn.addEventListener("click", function () {
+        confidence[idx] = btn.getAttribute("data-v");
+        Array.prototype.forEach.call(stageEl.querySelectorAll(".pill"), function (b) { b.classList.remove("selected"); });
+        btn.classList.add("selected");
+        setTimeout(function () { advanceFrom(data, idx); }, 220);
+      });
+    });
+  }
+
+  function advanceFrom(data, idx) {
+    if (idx + 1 < data.questions.length) {
+      renderQuestion(data, idx + 1);
+    } else {
+      renderSubjectiveStep(data);
+    }
+  }
+
+  function renderSubjectiveStep(data) {
+    progressWrap.style.display = "block";
+    progressFill.style.width = "100%";
+    progressLabel.textContent = TOTAL_STEPS + " / " + TOTAL_STEPS;
+    stageEl.innerHTML =
+      '<p class="banner" style="margin-bottom:14px;">마지막은 찍을 수 없는 문제.</p>' +
+      '<div class="q-index">Q10 · 주관식</div>' +
+      '<div class="q-text">' + escapeHtml(data.creatorNickname) + "라면?<br/>" + escapeHtml(data.subjectivePrompt) + "</div>" +
+      '<div class="field"><input id="subjInput" type="text" maxlength="80" placeholder="솔직하게, 짧게 예상해보세요"/></div>' +
+      '<button class="btn btn-primary" id="subjNextBtn">완료하고 결과 보기 →</button>';
+
+    var input = document.getElementById("subjInput");
+    input.focus();
+    function go() {
+      var v = input.value.trim();
+      if (!v) { input.focus(); return; }
+      subjectiveGuess = v.slice(0, 80);
+      track("subjective_completed");
+      submitAttempt(data);
+    }
+    document.getElementById("subjNextBtn").addEventListener("click", go);
+    input.addEventListener("keydown", function (e) { if (e.key === "Enter") go(); });
   }
 
   function submitAttempt(data) {
@@ -164,11 +232,19 @@
     fetch("/api/submit-attempt", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ gameId: data.gameId, nickname: respondentNickname, guesses: guesses, clientId: clientId }),
+      body: JSON.stringify({
+        gameId: data.gameId,
+        nickname: respondentNickname,
+        guesses: guesses,
+        confidence: confidence,
+        subjectiveGuess: subjectiveGuess,
+        clientId: clientId,
+      }),
     })
       .then(function (r) { return r.json(); })
       .then(function (result) {
         if (!result || typeof result.score !== "number") throw new Error("bad response");
+        track("game_complete");
         return fetch("/api/game?token=" + encodeURIComponent(data.gameId) + "&clientId=" + encodeURIComponent(clientId))
           .then(function (r2) { return r2.json(); })
           .then(function (freshData) {
@@ -186,28 +262,46 @@
   // ---------- 응답자: 결과 화면 ----------
   function renderResultView(data, result, ranking) {
     progressWrap.style.display = "none";
+    track("result_reveal");
     var nickname = result.nickname || respondentNickname;
     var showRanking = ranking && ranking.length >= 2;
 
     stageEl.innerHTML =
       '<div class="score-big"><div class="num">' + result.score + '%</div><div class="cap">' + escapeHtml(result.scoreCopy) + "</div></div>" +
-      '<p style="text-align:center;font-weight:800;margin:2px 0 18px;">' + escapeHtml(data.creatorNickname) + "님을 <b>" + result.score + "%</b> 알고 있어요 · 칭호: &quot;" + escapeHtml(result.title) + "&quot;</p>" +
-      '<div class="section-title">📊 카테고리별 점수</div>' +
-      categoryBarsHtml(result.categoryScores) +
-      (showRanking ? '<div class="section-title">🏆 랭킹</div>' + rankingHtml(ranking, nickname) : "") +
+      '<p style="text-align:center;font-weight:800;margin:2px 0 4px;">' + escapeHtml(data.creatorNickname) + " 이해도 " + result.score + "%</p>" +
+      '<p style="text-align:center;font-size:13.5px;color:var(--ink-2);margin:0 0 18px;line-height:1.6;">' + escapeHtml(result.oneLiner) + "</p>" +
+      surfaceInnerBarsHtml(result.surfaceScore, result.innerScore) +
+      (showRanking ? '<div class="section-title">' + escapeHtml(data.creatorNickname) + '를 제일 잘 아는 사람</div>' + rankingHtml(ranking, nickname) : "") +
       '<div class="locked" id="adGateBox">' +
-      '<div style="font-weight:800;font-size:14.5px;margin-bottom:6px;">🔍 가장 의외로 틀린 질문</div>' +
-      "<ul><li>짧은 광고 하나 보면 바로 확인할 수 있어요</li><li>어떤 질문에서 의외의 답을 골랐는지</li><li>" + escapeHtml(data.creatorNickname) + "님의 실제 답까지 같이 보여드려요</li></ul>" +
-      '<button class="btn btn-primary unlock-btn" id="watchAdBtn">광고 보고 확인하기</button>' +
+      '<div style="font-weight:800;font-size:14.5px;margin-bottom:6px;">우리가 엇갈린 순간</div>' +
+      "<ul><li>점수보다 재미있는 이야기가 하나 있어요</li><li>가장 크게 엇갈린 부분과 확신했는데 틀린 답</li><li>주관식 답변이 얼마나 비슷했는지도 같이 보여드려요</li></ul>" +
+      '<button class="btn btn-primary unlock-btn" id="watchAdBtn">15초 보고 확인하기</button>' +
       "</div>" +
-      '<div class="cta-fixed"><a class="btn btn-ghost" href="./create.html">나도 만들기 →</a></div>';
+      '<div class="section-title">그런데 ' + escapeHtml(data.creatorNickname) + '는 나를 얼마나 알까?</div>' +
+      '<div class="cta-fixed"><a class="btn btn-ghost" href="./create.html" id="reverseCta">이번엔 내 테스트 만들기 →</a></div>';
+
+    var reverseCta = document.getElementById("reverseCta");
+    if (reverseCta) reverseCta.addEventListener("click", function () { track("reverse_challenge_click"); });
 
     document.getElementById("watchAdBtn").addEventListener("click", function () {
       handleWatchAd(data, result);
     });
   }
 
+  function surfaceInnerBarsHtml(surfaceScore, innerScore) {
+    if (surfaceScore == null && innerScore == null) return "";
+    var rows = [];
+    if (surfaceScore != null) {
+      rows.push('<div class="stat-row"><div class="stat-label">겉으로 보이는 나</div><div class="stat-track"><div class="stat-fill" style="width:' + surfaceScore + '%"></div></div><div class="stat-val">' + surfaceScore + "</div></div>");
+    }
+    if (innerScore != null) {
+      rows.push('<div class="stat-row"><div class="stat-label">속으로 생각하는 나</div><div class="stat-track"><div class="stat-fill" style="width:' + innerScore + '%"></div></div><div class="stat-val">' + innerScore + "</div></div>");
+    }
+    return rows.join("");
+  }
+
   function handleWatchAd(data, result) {
+    track("rewarded_ad_start");
     var box = document.getElementById("adGateBox");
     var seconds = 3;
     box.innerHTML =
@@ -220,9 +314,10 @@
       if (el) el.textContent = seconds > 0 ? "광고 재생 중... " + seconds + "초" : "완료!";
       if (seconds <= 0) {
         clearInterval(timer);
+        track("rewarded_ad_complete");
         fetch("/api/attempt-detail?gameId=" + encodeURIComponent(data.gameId) + "&attemptId=" + encodeURIComponent(result.attemptId))
           .then(function (r) { return r.json(); })
-          .then(function (detail) { renderDetail(detail); })
+          .then(function (detail) { renderReplay(detail); })
           .catch(function () {
             var b = document.getElementById("adGateBox");
             if (b) b.innerHTML = '<p style="text-align:center;color:var(--warn);">불러오지 못했어요.</p>';
@@ -231,47 +326,65 @@
     }, 1000);
   }
 
-  function renderDetail(detail) {
+  function renderReplay(detail) {
+    track("replay_view");
     var box = document.getElementById("adGateBox");
     if (!box) return;
-    if (!detail.items || !detail.items.length) {
-      box.outerHTML = '<p class="banner">👏 전부 다 맞혔어요! 의외로 틀린 질문이 없네요.</p>';
-      return;
-    }
-    var itemsHtml = detail.items.map(function (it) {
-      return (
-        '<div class="advice-bubble advice-partner">' +
-        '<span class="advice-name">[' + escapeHtml(it.category) + "] " + escapeHtml(it.text) + "</span>" +
-        "내 예상: " + escapeHtml(it.myGuess) + "<br/>실제 답: <b>" + escapeHtml(it.actualAnswer) + "</b>" +
+
+    var blocks = [];
+
+    if (detail.bestKnownArea) {
+      blocks.push(
+        '<div class="advice-bubble advice-me">' +
+        '<span class="advice-name">내가 제일 잘 아는 부분</span>' +
+        escapeHtml(detail.bestKnownArea.label) + " 관련 질문은 " + detail.bestKnownArea.correct + " / " + detail.bestKnownArea.total + "개 맞혔어요." +
         "</div>"
       );
-    }).join("");
-    box.outerHTML = '<div class="section-title">🔍 가장 의외로 틀린 질문</div>' + itemsHtml;
+    }
+    if (detail.mostMissedArea) {
+      blocks.push(
+        '<div class="advice-bubble advice-partner">' +
+        '<span class="advice-name">가장 크게 엇갈린 부분</span>' +
+        escapeHtml(detail.mostMissedArea.label) + " 관련 질문에서는 " + detail.mostMissedArea.correct + " / " + detail.mostMissedArea.total + "개만 맞혔어요." +
+        "</div>"
+      );
+    }
+    if (detail.confidentMiss) {
+      blocks.push(
+        '<div class="advice-bubble advice-partner">' +
+        '<span class="advice-name">가장 자신 있었는데 빗나간 답</span>' +
+        escapeHtml(detail.confidentMiss.text) + "<br/>내 예상: " + escapeHtml(detail.confidentMiss.myGuess) +
+        "<br/>실제 답: <b>" + escapeHtml(detail.confidentMiss.actualAnswer) + "</b>" +
+        "</div>"
+      );
+    }
+    if (detail.subjective && detail.subjective.prompt) {
+      var s = detail.subjective;
+      blocks.push(
+        '<div class="advice-bubble advice-me">' +
+        '<span class="advice-name">주관식 의미 싱크 ' + (s.semanticScore != null ? s.semanticScore + "%" : "") + "</span>" +
+        escapeHtml(s.prompt) + "<br/>내 예상: " + escapeHtml(s.myGuess) + "<br/>실제 답: <b>" + escapeHtml(s.actualAnswer) + "</b>" +
+        (s.reason ? '<div style="margin-top:6px;color:var(--ink-muted);font-size:12.5px;">' + escapeHtml(s.reason) + "</div>" : "") +
+        "</div>"
+      );
+    }
+
+    box.outerHTML =
+      '<div class="section-title">우리가 엇갈린 순간</div>' +
+      blocks.join("") +
+      '<p class="mini-note">' + escapeHtml(detail.oneLiner || "") + "</p>";
   }
 
   // ---------- 공통 헬퍼 ----------
-  function categoryBarsHtml(categoryScores) {
-    categoryScores = categoryScores || {};
-    return GameCore.CATEGORIES.map(function (cat) {
-      var val = categoryScores[cat];
-      if (val === null || val === undefined) return "";
-      return (
-        '<div class="stat-row"><div class="stat-label">' + escapeHtml(cat) + '</div>' +
-        '<div class="stat-track"><div class="stat-fill" style="width:' + val + '%"></div></div>' +
-        '<div class="stat-val">' + val + "</div></div>"
-      );
-    }).join("");
-  }
-
   function rankingHtml(ranking, highlightNickname) {
     if (!ranking || !ranking.length) return '<p class="lb-loading">아직 랭킹이 없어요.</p>';
     var rows = ranking.map(function (r, i) {
-      var medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + "위";
+      var medal = i === 0 ? "1위" : i === 1 ? "2위" : i === 2 ? "3위" : (i + 1) + "위";
       var cls = highlightNickname && r.nickname === highlightNickname ? "lb-row lb-row-me" : "lb-row";
       return (
         '<div class="' + cls + '"><div class="lb-rank">' + medal + "</div>" +
         '<div class="lb-names">' + escapeHtml(r.nickname) + "</div>" +
-        '<div class="lb-score">' + r.score + "점</div></div>"
+        '<div class="lb-score">' + r.score + "%</div></div>"
       );
     }).join("");
     return '<div class="lb-list">' + rows + "</div>";
