@@ -38,11 +38,11 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  let title = "누가날알까 — 친구들이 나를 얼마나 알고 있을까?";
-  let desc = "10문제로 확인하는 우리의 텔레파시 지수. 지금 확인해보세요 👀";
+  let title = "누가날알까 — 정말 나를 잘 아는 걸까?";
+  let desc = "10개의 질문, 마지막 한 문제는 찍을 수도 없어요.";
   if (creatorNickname) {
-    title = escapeHtml(creatorNickname) + "님이 도전장을 보냈어요! 얼마나 잘 아세요?";
-    desc = "10문제 · 1분이면 충분해요. 지금 확인해보세요 👀";
+    title = escapeHtml(creatorNickname) + "를 얼마나 잘 알고 있어?";
+    desc = "10개의 질문. 마지막 한 문제는 찍을 수도 없어요.";
   }
 
   const redirectUrl = "/game.html" + (gameId ? "?token=" + encodeURIComponent(gameId) : "");
