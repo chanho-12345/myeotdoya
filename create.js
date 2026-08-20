@@ -264,9 +264,14 @@
     try {
       if (window.Kakao && window.Kakao.isInitialized() && window.Kakao.Share) {
         window.Kakao.Share.sendDefault({
-          objectType: "text",
-          text: shareText,
-          link: { mobileWebUrl: shareUrl, webUrl: shareUrl },
+          objectType: "feed",
+          content: {
+            title: shareText,
+            description: "내가 먼저 답을 골라놨어. 10문제, 1분이면 끝나요.",
+            imageUrl: "https://myeotdoya.vercel.app/og-image.png",
+            link: { mobileWebUrl: shareUrl, webUrl: shareUrl },
+          },
+          buttons: [{ title: "테스트 하러 가기", link: { mobileWebUrl: shareUrl, webUrl: shareUrl } }],
         });
         return;
       }
