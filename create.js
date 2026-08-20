@@ -103,7 +103,7 @@
 
     stageEl.innerHTML =
       '<div class="q-top-row"><button class="q-back-btn" id="backBtn">← 이전</button></div>' +
-      '<p class="banner" style="margin-bottom:14px;">마지막은 찍을 수 없는 문제.</p>' +
+      '<p class="banner" style="margin-bottom:14px;">마지막은 찍어서 맞힐 수 없어.</p>' +
       '<div class="q-index">Q10 · 주관식</div>' +
       '<div class="q-text">아래 중 하나를 골라서, 내 진짜 답을 적어주세요</div>' +
       '<div class="pill-group" id="promptPills">' + pillsHtml + "</div>" +
