@@ -9,6 +9,7 @@
 <meta property="og:description" content="내 답을 먼저 고르고 친구들에게 보내보세요. 생각보다 의외의 결과가 나올 수도 있어요." />
 <meta property="og:type" content="website" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
 <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -16,7 +17,10 @@
   <div class="brand"><span class="dot"></span> 누가날알까</div>
 
   <div class="hero">
-    <h1>친한 사이라고,<br/>정말 나를 잘 아는 걸까?</h1>
+    <h1><span class="line1">친한 사이라고,</span><span class="line2">정말 나를 잘 아는 걸까?</span></h1>
+    <div class="landing-connector" aria-hidden="true">
+      <span class="ldot"></span><span class="lline"></span><span class="ldot"></span>
+    </div>
     <p>내가 먼저 답을 고르고 친구에게 보내보세요.<br/>처음엔 쉬워 보여도, 갈수록 진짜 가까워야 맞힐 수 있어요.</p>
   </div>
 
@@ -25,7 +29,7 @@
     <li><span class="ico">·</span>내가 뭘 틀렸는지는 나만 볼 수 있어요</li>
   </ul>
 
-  <div class="cta-fixed">
+  <div class="cta-fixed cta-landing">
     <a class="btn btn-primary" href="./create.html">내 테스트 만들기 →</a>
     <p style="text-align:center;font-size:12px;color:var(--ink-muted);margin:10px 0 0;">10문제 · 약 1분 · 무료</p>
   </div>
