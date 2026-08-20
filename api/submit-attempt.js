@@ -1,9 +1,9 @@
 // Vercel Serverless Function — POST /api/submit-attempt
-// body: { gameId, nickname, guesses: [10 ints], clientId }
-// 응답자의 추측을 서버에서만 채점함 (생성자의 정답은 이 함수 안에서만 읽고,
-// 응답에는 점수/카테고리 점수만 내려줌 — 문항별 정답 자체는 내려주지 않음).
-// clientId로 중복 제출을 막고(로그인 없이도), 이미 낸 사람이 다시 보내면
-// 새로 만들지 않고 기존 결과를 그대로 돌려줌(멱등 처리).
+// body: { gameId, nickname, guesses: [9 ints], confidence: [9 | null], subjectiveGuess, clientId }
+// V2: 객관식 9문제(가중치 반영) + 주관식 1문제(AI 의미 비교)를 한 번에 채점함.
+// 생성자의 정답(game.answers / game.subjectiveAnswer)은 이 함수 안에서만 읽고,
+// 응답에는 점수류만 내려줌 — 문항별 정답 텍스트는 attempt-detail.js에서만,
+// 그것도 이미 채점이 끝난 "본인 시도"에 한해서만 내려줌.
 
 const GameCore = require("../game-core.js");
 
@@ -39,6 +39,72 @@ function clip(s, n) {
   return String(s || "").trim().slice(0, n);
 }
 
+function buildSemanticPrompt(promptText, creatorAnswer, respondentGuess) {
+  return (
+    "너는 두 사람의 짧은 주관식 답변이 의미적으로 얼마나 비슷한지 판단하는 채점자야. " +
+    "새로운 사실을 지어내거나 심리 분석을 하지 말고, 오직 두 문장의 의미 유사도만 판단해.\n\n" +
+    "[질문]\n" + promptText + "\n\n" +
+    "[생성자의 실제 답변]\n" + creatorAnswer + "\n\n" +
+    "[응답자의 추측]\n" + respondentGuess + "\n\n" +
+    "표현이 다르더라도 핵심 의미가 같으면 높은 점수를 줘. 완전히 다른 내용이면 낮은 점수를 줘.\n\n" +
+    "아래 JSON 형식으로만 답해. 다른 설명이나 마크다운 없이 순수 JSON 객체 하나만 출력해:\n" +
+    "{\n" +
+    '  "semantic_score": 0~100 사이 정수,\n' +
+    '  "match_level": "very_close" | "close" | "partial" | "different" 중 하나,\n' +
+    '  "short_reason": "한 문장, 20자 내외로 왜 그런 점수인지"\n' +
+    "}"
+  );
+}
+
+// AI가 실패해도(키 없음/타임아웃/파싱실패) 게임이 멈추면 안 되므로,
+// 항상 { score, level, reason, viaAI } 형태로 반환하고 실패 시 fallback으로 대체함.
+async function semanticScore(promptText, creatorAnswer, respondentGuess) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey || !creatorAnswer || !respondentGuess) {
+    const s = GameCore.fallbackSemanticScore(creatorAnswer, respondentGuess);
+    return { score: s, level: GameCore.matchLevelForScore(s), reason: "표현은 다르지만 겹치는 단어를 기준으로 비교했어요.", viaAI: false };
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const upstream = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-5",
+        max_tokens: 300,
+        messages: [{ role: "user", content: buildSemanticPrompt(promptText, creatorAnswer, respondentGuess) }],
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!upstream.ok) throw new Error("upstream_" + upstream.status);
+    const data = await upstream.json();
+    const textBlock = data && Array.isArray(data.content) ? data.content.find((b) => b && b.type === "text") : null;
+    const raw = textBlock && textBlock.text;
+    if (!raw) throw new Error("empty_response");
+    const jsonStart = raw.indexOf("{");
+    const jsonEnd = raw.lastIndexOf("}");
+    const parsed = JSON.parse(raw.slice(jsonStart, jsonEnd + 1));
+    const score = Math.max(0, Math.min(100, Math.round(Number(parsed.semantic_score))));
+    if (Number.isNaN(score)) throw new Error("bad_score");
+    return {
+      score: score,
+      level: parsed.match_level || GameCore.matchLevelForScore(score),
+      reason: clip(parsed.short_reason, 60) || "의미를 비교해봤어요.",
+      viaAI: true,
+    };
+  } catch (e) {
+    const s = GameCore.fallbackSemanticScore(creatorAnswer, respondentGuess);
+    return { score: s, level: GameCore.matchLevelForScore(s), reason: "표현은 다르지만 겹치는 단어를 기준으로 비교했어요.", viaAI: false };
+  }
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "method_not_allowed" });
@@ -59,9 +125,11 @@ module.exports = async function handler(req, res) {
     const gameId = body.gameId || "";
     const nickname = clip(body.nickname, 12);
     const guesses = body.guesses;
+    const confidenceRaw = Array.isArray(body.confidence) ? body.confidence : [];
+    const subjectiveGuess = clip(body.subjectiveGuess, 200);
     const clientId = clip(body.clientId, 64);
 
-    if (!gameId || !nickname || !clientId) {
+    if (!gameId || !nickname || !clientId || !subjectiveGuess) {
       res.status(400).json({ error: "missing_data" });
       return;
     }
@@ -77,13 +145,17 @@ module.exports = async function handler(req, res) {
     if (existingAttemptId) {
       const attempt = await redis.hgetall("attempt:" + existingAttemptId);
       if (attempt && attempt.nickname) {
-        const score = Number(attempt.score || 0);
         res.status(200).json({
           attemptId: existingAttemptId,
-          score: score,
-          categoryScores: safeParseField(attempt.categoryScores, {}),
-          title: GameCore.titleForScore(score),
-          scoreCopy: GameCore.scoreCopy(score),
+          score: Number(attempt.score || 0),
+          surfaceScore: attempt.surfaceScore != null ? Number(attempt.surfaceScore) : null,
+          innerScore: attempt.innerScore != null ? Number(attempt.innerScore) : null,
+          title: GameCore.titleForScore(Number(attempt.score || 0)),
+          scoreCopy: GameCore.scoreCopy(Number(attempt.score || 0)),
+          oneLiner: GameCore.relationshipOneLiner(
+            attempt.surfaceScore != null ? Number(attempt.surfaceScore) : null,
+            attempt.innerScore != null ? Number(attempt.innerScore) : null
+          ),
           alreadyResponded: true,
         });
         return;
@@ -105,8 +177,13 @@ module.exports = async function handler(req, res) {
         return;
       }
     }
+    const confidence = questions.map(function (q, i) {
+      const c = confidenceRaw[i];
+      return ["guess", "half", "sure"].indexOf(c) !== -1 ? c : null;
+    });
 
-    const result = GameCore.scoreAttempt(questionIds, creatorAnswers, guesses);
+    const semantic = await semanticScore(game.subjectivePrompt || "", game.subjectiveAnswer || "", subjectiveGuess);
+    const result = GameCore.scoreAttempt(questionIds, creatorAnswers, guesses, semantic.score);
     const attemptId = GameCore.genId(12);
 
     await redis.hset("attempt:" + attemptId, {
@@ -114,8 +191,14 @@ module.exports = async function handler(req, res) {
       nickname: nickname,
       answers: JSON.stringify(guesses),
       correctFlags: JSON.stringify(result.correctFlags),
+      confidence: JSON.stringify(confidence),
+      subjectiveGuess: subjectiveGuess,
+      semanticScore: semantic.score,
+      semanticLevel: semantic.level,
+      semanticReason: semantic.reason,
       score: result.score,
-      categoryScores: JSON.stringify(result.categoryScores),
+      surfaceScore: result.surfaceScore == null ? "" : result.surfaceScore,
+      innerScore: result.innerScore == null ? "" : result.innerScore,
       createdAt: Date.now(),
     });
     await redis.zadd("game:" + gameId + ":ranking", { score: result.score, member: attemptId });
@@ -133,9 +216,11 @@ module.exports = async function handler(req, res) {
     res.status(200).json({
       attemptId: attemptId,
       score: result.score,
-      categoryScores: result.categoryScores,
+      surfaceScore: result.surfaceScore,
+      innerScore: result.innerScore,
       title: GameCore.titleForScore(result.score),
       scoreCopy: GameCore.scoreCopy(result.score),
+      oneLiner: GameCore.relationshipOneLiner(result.surfaceScore, result.innerScore),
       alreadyResponded: false,
     });
   } catch (e) {
