@@ -6,11 +6,15 @@
   var progressFill = document.getElementById("progressFill");
   var progressLabel = document.getElementById("progressLabel");
 
+  var TOTAL_STEPS = 10; // 객관식 9 + 주관식 1
+
   var nickname = "";
   var questionIds = GameCore.pickRandomQuestionSet();
   var questions = GameCore.getQuestionsByIds(questionIds);
   var answers = new Array(questions.length).fill(null);
-  var step = 0; // 0 = 닉네임, 1~10 = 질문(questions[step-1]), 11 = 완료/제출
+  var subjectivePrompt = "";
+  var subjectiveAnswer = "";
+  var step = 0; // 0=닉네임, 1~9=질문(questions[step-1]), 10=주관식, 11=완료/제출
 
   function escapeHtml(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -21,6 +25,7 @@
   function render() {
     if (step === 0) return renderNickname();
     if (step >= 1 && step <= questions.length) return renderQuestion(step - 1);
+    if (step === questions.length + 1) return renderSubjective();
     return renderComplete();
   }
 
@@ -47,9 +52,10 @@
 
   function renderQuestion(idx) {
     progressWrap.style.display = "block";
-    progressFill.style.width = Math.round(((idx + 1) / questions.length) * 100) + "%";
-    progressLabel.textContent = (idx + 1) + " / " + questions.length;
+    progressFill.style.width = Math.round(((idx + 1) / TOTAL_STEPS) * 100) + "%";
+    progressLabel.textContent = (idx + 1) + " / " + TOTAL_STEPS;
     var q = questions[idx];
+    var banner = GameCore.depthBannerForIndex(idx);
     var backHtml = idx === 0
       ? '<div class="q-top-row"><span></span></div>'
       : '<div class="q-top-row"><button class="q-back-btn" id="backBtn">← 이전</button></div>';
@@ -59,7 +65,8 @@
     }).join("");
     stageEl.innerHTML =
       backHtml +
-      '<div class="q-index">Q' + (idx + 1) + ". " + escapeHtml(q.category) + "</div>" +
+      (banner ? '<p class="banner" style="margin-bottom:14px;">' + escapeHtml(banner) + "</p>" : "") +
+      '<div class="q-index">Q' + (idx + 1) + "</div>" +
       '<div class="q-text">' + escapeHtml(q.text) + "</div>" +
       '<div class="opt-list">' + optsHtml + "</div>";
 
@@ -84,6 +91,58 @@
     });
   }
 
+  function renderSubjective() {
+    progressWrap.style.display = "block";
+    progressFill.style.width = "100%";
+    progressLabel.textContent = TOTAL_STEPS + " / " + TOTAL_STEPS;
+
+    var pillsHtml = GameCore.SUBJECTIVE_PROMPTS.map(function (p) {
+      var sel = subjectivePrompt === p ? " selected" : "";
+      return '<button class="pill' + sel + '" data-p="' + escapeHtml(p) + '">' + escapeHtml(p) + "</button>";
+    }).join("");
+
+    stageEl.innerHTML =
+      '<div class="q-top-row"><button class="q-back-btn" id="backBtn">← 이전</button></div>' +
+      '<p class="banner" style="margin-bottom:14px;">마지막은 찍을 수 없는 문제.</p>' +
+      '<div class="q-index">Q10 · 주관식</div>' +
+      '<div class="q-text">아래 중 하나를 골라서, 내 진짜 답을 적어주세요</div>' +
+      '<div class="pill-group" id="promptPills">' + pillsHtml + "</div>" +
+      '<div id="subjectiveInputArea" style="margin-top:16px;' + (subjectivePrompt ? "" : "display:none;") + '">' +
+      '<div class="field"><label id="chosenPromptLabel">' + escapeHtml(subjectivePrompt) + '</label>' +
+      '<input id="subjectiveInput" type="text" maxlength="80" placeholder="솔직하게, 짧게 적어주세요" value="' + escapeHtml(subjectiveAnswer) + '"/></div>' +
+      '<button class="btn btn-primary" id="subjectiveNextBtn">완료하기 →</button>' +
+      "</div>";
+
+    var backBtn = document.getElementById("backBtn");
+    backBtn.addEventListener("click", function () {
+      step -= 1;
+      render();
+    });
+
+    Array.prototype.forEach.call(stageEl.querySelectorAll(".pill"), function (btn) {
+      btn.addEventListener("click", function () {
+        subjectivePrompt = btn.getAttribute("data-p");
+        render();
+        var input = document.getElementById("subjectiveInput");
+        if (input) input.focus();
+      });
+    });
+
+    var nextBtn = document.getElementById("subjectiveNextBtn");
+    if (nextBtn) {
+      var subjInput = document.getElementById("subjectiveInput");
+      function go() {
+        var v = subjInput.value.trim();
+        if (!v) { subjInput.focus(); return; }
+        subjectiveAnswer = v.slice(0, 80);
+        step = questions.length + 2;
+        render();
+      }
+      nextBtn.addEventListener("click", go);
+      subjInput.addEventListener("keydown", function (e) { if (e.key === "Enter") go(); });
+    }
+  }
+
   function showToast(msg) {
     var t = document.createElement("div");
     t.className = "toast show";
@@ -103,7 +162,13 @@
     fetch("/api/create-game", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ nickname: nickname, questionIds: questionIds, answers: answers }),
+      body: JSON.stringify({
+        nickname: nickname,
+        questionIds: questionIds,
+        answers: answers,
+        subjectivePrompt: subjectivePrompt,
+        subjectiveAnswer: subjectiveAnswer,
+      }),
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -113,8 +178,7 @@
         try { localStorage.setItem("myeotdoya_owner_" + data.gameId, data.ownerToken); } catch (e) {}
 
         stageEl.innerHTML =
-          '<div style="text-align:center;font-size:48px;">🎉</div>' +
-          '<div class="q-text" style="text-align:center;">게임이 만들어졌어요!</div>' +
+          '<div class="q-text" style="text-align:center;">테스트가 만들어졌어요</div>' +
           '<p style="font-size:14px;color:var(--ink-2);text-align:center;margin-top:-8px;">아래 링크를 친구들에게 보내서 도전장을 날려보세요.</p>' +
           '<div class="field"><input id="shareUrlInput" type="text" readonly value="' + escapeHtml(shareUrl) + '"/></div>' +
           '<button class="btn btn-primary" id="copyBtn">링크 복사하기</button>' +
