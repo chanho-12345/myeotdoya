@@ -1,6 +1,12 @@
 (function () {
   "use strict";
   var GameCore = window.GameCore;
+
+  var KAKAO_JS_KEY = "9571640b8eab8e91dc39c6bc0018e149";
+  try {
+    if (window.Kakao && !window.Kakao.isInitialized()) { window.Kakao.init(KAKAO_JS_KEY); }
+  } catch (e) {}
+
   var stageEl = document.getElementById("stage");
   var progressWrap = document.getElementById("progressWrap");
   var progressFill = document.getElementById("progressFill");
@@ -222,6 +228,88 @@
     setTimeout(function () { t.remove(); }, 1800);
   }
 
+  function copyLink(url) {
+    function fallbackCopy() {
+      var tmp = document.createElement("textarea");
+      tmp.value = url;
+      tmp.style.position = "fixed";
+      tmp.style.opacity = "0";
+      document.body.appendChild(tmp);
+      tmp.select();
+      try { document.execCommand("copy"); } catch (e) {}
+      tmp.remove();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).catch(fallbackCopy);
+    } else {
+      fallbackCopy();
+    }
+  }
+
+  function shareViaKakao(shareUrl, shareText) {
+    try {
+      if (window.Kakao && window.Kakao.isInitialized() && window.Kakao.Share) {
+        window.Kakao.Share.sendDefault({
+          objectType: "text",
+          text: shareText,
+          link: { mobileWebUrl: shareUrl, webUrl: shareUrl },
+        });
+        return;
+      }
+    } catch (e) {}
+    copyLink(shareUrl);
+    showToast("링크가 복사됐어요. 카카오톡에서 붙여넣어 보내주세요!");
+  }
+
+  // 링크를 그냥 복사만 하는 대신, "어디로 보낼지" 고르는 공유 시트를 띄움 (LOVE DNA와 동일한 방식).
+  function openShareSheet(shareUrl, shareText) {
+    var old = document.getElementById("shareSheetOverlay");
+    if (old) old.remove();
+
+    var overlay = document.createElement("div");
+    overlay.className = "share-sheet-overlay";
+    overlay.id = "shareSheetOverlay";
+    overlay.innerHTML =
+      '<div class="share-sheet">' +
+      '<div class="share-sheet-title">친구에게 보내기</div>' +
+      '<div class="share-sheet-grid">' +
+      '<button class="share-sheet-item" data-action="kakao"><span class="share-sheet-ico ico-kakao" style="font-size:16px;font-weight:800;">톡</span><span class="share-sheet-label">카카오톡</span></button>' +
+      '<button class="share-sheet-item" data-action="sms"><span class="share-sheet-ico ico-sms" style="font-size:16px;font-weight:800;">문자</span><span class="share-sheet-label">문자</span></button>' +
+      '<button class="share-sheet-item" data-action="fb"><span class="share-sheet-ico ico-fb" style="font-size:18px;font-weight:800;">f</span><span class="share-sheet-label">페이스북</span></button>' +
+      '<button class="share-sheet-item" data-action="copy"><span class="share-sheet-ico ico-copy" style="font-size:16px;font-weight:800;">복사</span><span class="share-sheet-label">링크 복사</span></button>' +
+      "</div>" +
+      '<button class="btn btn-ghost share-sheet-cancel" id="shareSheetCancel">닫기</button>' +
+      "</div>";
+    document.body.appendChild(overlay);
+    requestAnimationFrame(function () { overlay.classList.add("show"); });
+
+    function close() {
+      overlay.classList.remove("show");
+      setTimeout(function () { overlay.remove(); }, 220);
+    }
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
+    document.getElementById("shareSheetCancel").addEventListener("click", close);
+
+    Array.prototype.forEach.call(overlay.querySelectorAll(".share-sheet-item"), function (btn) {
+      btn.addEventListener("click", function () {
+        var action = btn.getAttribute("data-action");
+        if (action === "kakao") {
+          shareViaKakao(shareUrl, shareText);
+        } else if (action === "sms") {
+          var body = encodeURIComponent(shareText + " " + shareUrl);
+          var isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+          window.location.href = isIOS ? ("sms:&body=" + body) : ("sms:?body=" + body);
+        } else if (action === "fb") {
+          window.open("https://www.facebook.com/sharer/sharer.php?u=" + encodeURIComponent(shareUrl), "_blank", "noopener,width=600,height=520");
+        } else if (action === "copy") {
+          copyLink(shareUrl);
+          showToast("링크가 복사됐어요!");
+        }
+        close();
+      });
+    });
+  }
+
   function renderComplete() {
     progressWrap.style.display = "none";
     stageEl.innerHTML =
@@ -260,23 +348,13 @@
           '<div class="q-text" style="text-align:center;">테스트가 만들어졌어요</div>' +
           '<p style="font-size:14px;color:var(--ink-2);text-align:center;margin-top:-8px;">아래 링크를 친구들에게 보내서 도전장을 날려보세요.</p>' +
           '<div class="field"><input id="shareUrlInput" type="text" readonly value="' + escapeHtml(shareUrl) + '"/></div>' +
-          '<button class="btn btn-primary cta-pulse-once" id="copyBtn">링크 복사하기</button>' +
+          '<button class="btn btn-primary cta-pulse-once" id="copyBtn">친구에게 보내기</button>' +
           '<a class="btn btn-ghost" style="display:block;margin-top:10px;box-sizing:border-box;" href="' + escapeHtml(ownerUrl) + '">내 게임 페이지로 이동 →</a>' +
           '<p class="footer-note">내 게임 페이지 링크는 나만 가지고 있어야 해요 — 친구들에게는 위의 공유 링크만 보내주세요. 즐겨찾기 해두는 걸 추천해요.</p>';
         playStageAnim();
 
-        var shareInput = document.getElementById("shareUrlInput");
         document.getElementById("copyBtn").addEventListener("click", function () {
-          function fallbackCopy() {
-            shareInput.select();
-            try { document.execCommand("copy"); } catch (e) {}
-            showToast("링크가 복사됐어요!");
-          }
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(shareUrl).then(function () { showToast("링크가 복사됐어요!"); }, fallbackCopy);
-          } else {
-            fallbackCopy();
-          }
+          openShareSheet(shareUrl, nickname + "를 얼마나 아는지 테스트해봐!");
         });
       })
       .catch(function () {
