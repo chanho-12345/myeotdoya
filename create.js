@@ -246,6 +246,20 @@
     }
   }
 
+  // 만든 테스트를 "내가 만든 테스트" 보관함(로컬 저장)에 남겨서, 나중에 owner 링크를 잃어버려도 찾을 수 있게 함.
+  function saveMyTest(gameId, ownerToken, creatorNickname) {
+    try {
+      localStorage.setItem("myeotdoya_owner_" + gameId, ownerToken); // 예전 방식도 그대로 유지(하위 호환)
+      var raw = localStorage.getItem("myeotdoya_my_tests");
+      var list = [];
+      try { list = raw ? JSON.parse(raw) : []; } catch (e2) { list = []; }
+      if (!Array.isArray(list)) list = [];
+      list = list.filter(function (t) { return t.gameId !== gameId; });
+      list.unshift({ gameId: gameId, ownerToken: ownerToken, nickname: creatorNickname, createdAt: Date.now() });
+      localStorage.setItem("myeotdoya_my_tests", JSON.stringify(list.slice(0, 30)));
+    } catch (e) {}
+  }
+
   function shareViaKakao(shareUrl, shareText) {
     try {
       if (window.Kakao && window.Kakao.isInitialized() && window.Kakao.Share) {
@@ -342,7 +356,7 @@
         if (!data || !data.gameId) throw new Error("bad response");
         var shareUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId);
         var ownerUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId) + "&owner=" + encodeURIComponent(data.ownerToken);
-        try { localStorage.setItem("myeotdoya_owner_" + data.gameId, data.ownerToken); } catch (e) {}
+        saveMyTest(data.gameId, data.ownerToken, nickname);
 
         stageEl.innerHTML =
           '<div class="q-text" style="text-align:center;">테스트가 만들어졌어요</div>' +
@@ -350,7 +364,7 @@
           '<div class="field"><input id="shareUrlInput" type="text" readonly value="' + escapeHtml(shareUrl) + '"/></div>' +
           '<button class="btn btn-primary cta-pulse-once" id="copyBtn">친구에게 보내기</button>' +
           '<a class="btn btn-ghost" style="display:block;margin-top:10px;box-sizing:border-box;" href="' + escapeHtml(ownerUrl) + '">내 게임 페이지로 이동 →</a>' +
-          '<p class="footer-note">내 게임 페이지 링크는 나만 가지고 있어야 해요 — 친구들에게는 위의 공유 링크만 보내주세요. 즐겨찾기 해두는 걸 추천해요.</p>';
+          '<p class="footer-note">내 게임 페이지 링크는 나만 가지고 있어야 해요 — 친구들에게는 위의 공유 링크만 보내주세요.<br/><a href="./mytests.html">내가 만든 테스트 목록</a>에서 나중에 다시 찾을 수 있어요.</p>';
         playStageAnim();
 
         document.getElementById("copyBtn").addEventListener("click", function () {
