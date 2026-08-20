@@ -1,6 +1,8 @@
 // Vercel Serverless Function — GET /api/game?token=<gameId>&owner=<ownerToken>&clientId=<clientId>
 // 응답자/생성자 화면이 공통으로 쓰는 조회 API.
-// 생성자의 정답(game.answers)은 어떤 경우에도 응답에 포함하지 않음 — 서버 채점 전용.
+// 생성자의 정답(game.answers, game.subjectiveAnswer)은 어떤 경우에도 응답에
+// 포함하지 않음 — 서버 채점 전용. 주관식 "질문 문구"(subjectivePrompt)는
+// 정답이 아니라서 노출해도 안전함 — 응답자가 질문을 봐야 답을 쓸 수 있음.
 
 const GameCore = require("../game-core.js");
 
@@ -20,10 +22,8 @@ function getRedis() {
   }
 }
 
-// @upstash/redis는 JSON처럼 생긴 문자열을 읽을 때 자동으로 파싱해서 돌려줄 때가
-// 있어서, 이미 객체/배열이면 그대로 쓰고 문자열이면 그때만 JSON.parse 함.
 function safeParseField(v, fallback) {
-  if (v && (typeof v === "object")) return v;
+  if (v && typeof v === "object") return v;
   if (typeof v === "string") {
     try {
       return JSON.parse(v);
@@ -77,13 +77,17 @@ module.exports = async function handler(req, res) {
         const attempt = await redis.hgetall("attempt:" + myAttemptId);
         if (attempt && attempt.nickname) {
           const score = Number(attempt.score || 0);
+          const surfaceScore = attempt.surfaceScore === "" || attempt.surfaceScore == null ? null : Number(attempt.surfaceScore);
+          const innerScore = attempt.innerScore === "" || attempt.innerScore == null ? null : Number(attempt.innerScore);
           myAttempt = {
             attemptId: myAttemptId,
             nickname: attempt.nickname,
             score: score,
-            categoryScores: safeParseField(attempt.categoryScores, {}),
+            surfaceScore: surfaceScore,
+            innerScore: innerScore,
             title: GameCore.titleForScore(score),
             scoreCopy: GameCore.scoreCopy(score),
+            oneLiner: GameCore.relationshipOneLiner(surfaceScore, innerScore),
           };
         }
       }
@@ -120,7 +124,7 @@ module.exports = async function handler(req, res) {
           const idx = parseInt(key.replace("q", ""), 10);
           const q = questions[idx];
           if (q) {
-            entries.push({ category: q.category, text: q.text, missCount: Number(raw[key] || 0) });
+            entries.push({ category: GameCore.categoryLabel(q.category), text: q.text, missCount: Number(raw[key] || 0) });
           }
         });
       }
@@ -133,6 +137,7 @@ module.exports = async function handler(req, res) {
       creatorNickname: game.creatorNickname,
       attemptCount: attemptCount,
       questions: questions,
+      subjectivePrompt: game.subjectivePrompt || "",
       isOwner: isOwner,
       alreadyResponded: !!myAttempt,
       myAttempt: myAttempt,
