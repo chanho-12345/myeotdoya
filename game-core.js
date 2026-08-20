@@ -209,7 +209,7 @@
   // 질문 진행 중 깊이가 올라간다는 걸 알려주는 배너 — idx는 0-based (0~8)
   function depthBannerForIndex(idx) {
     if (idx === 0) return "가볍게 시작해볼게.";
-    if (idx === 3) return "여기부터는 좀 친해야 맞혀.";
+    if (idx === 3) return "여기까진 쉬웠지? 여기부터는 좀 친해야 맞혀.";
     if (idx === 6) return "이제 진짜 나를 아는지 볼 차례.";
     return "";
   }
