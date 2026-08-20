@@ -123,6 +123,19 @@ module.exports = async function handler(req, res) {
     const surfaceScore = attempt.surfaceScore === "" || attempt.surfaceScore == null ? null : Number(attempt.surfaceScore);
     const innerScore = attempt.innerScore === "" || attempt.innerScore == null ? null : Number(attempt.innerScore);
 
+    // 요약(제일 잘 아는 부분 등)만으론 부족하다는 피드백 반영 — 9문제 전부
+    // 맞았는지/틀렸는지 + 내 예상/실제 답을 하나하나 다 비교해서 같이 내려줌.
+    const perQuestion = questions.map(function (q, i) {
+      return {
+        category: GameCore.categoryLabel(q.category),
+        text: q.text,
+        correct: !!correctFlags[i],
+        myGuess: q.options[guesses[i]] || "",
+        actualAnswer: q.options[creatorAnswers[i]] || "",
+        confidence: confidence[i] || null,
+      };
+    });
+
     res.status(200).json({
       bestKnownArea: bestKnownArea,
       mostMissedArea: mostMissedArea,
@@ -131,6 +144,7 @@ module.exports = async function handler(req, res) {
       surfaceScore: surfaceScore,
       innerScore: innerScore,
       oneLiner: GameCore.relationshipOneLiner(surfaceScore, innerScore),
+      perQuestion: perQuestion,
     });
   } catch (e) {
     res.status(500).json({ error: "server_error", message: e.message });
