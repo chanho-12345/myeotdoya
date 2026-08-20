@@ -1,8 +1,9 @@
 // Vercel Serverless Function — POST /api/create-game
-// body: { nickname, questionIds: [10 ids], answers: [10 ints] }
-// 생성자가 자기 자신에 대한 질문 10개에 먼저 답한 걸 받아서 새 게임을 만듦.
-// answers(생성자의 정답)는 이후 그 어떤 GET 응답에도 절대 포함되지 않음 —
-// api/game.js, api/submit-attempt.js 쪽 주석 참고.
+// body: { nickname, questionIds: [9 ids, casualx3+personalx3+deepx3], answers: [9 ints],
+//         subjectivePrompt, subjectiveAnswer }
+// 생성자가 객관식 9개 + 주관식 1개에 먼저 답한 걸 받아서 새 게임을 만듦.
+// answers/subjectiveAnswer(생성자의 정답)는 이후 그 어떤 GET 응답에도 절대
+// 포함되지 않음 — api/game.js, api/submit-attempt.js 쪽 주석 참고.
 
 const GameCore = require("../game-core.js");
 
@@ -46,6 +47,8 @@ module.exports = async function handler(req, res) {
     const nickname = clip(body.nickname, 12);
     const questionIds = body.questionIds;
     const answers = body.answers;
+    const subjectivePrompt = clip(body.subjectivePrompt, 80);
+    const subjectiveAnswer = clip(body.subjectiveAnswer, 80);
 
     if (!nickname) {
       res.status(400).json({ error: "missing_nickname" });
@@ -57,6 +60,14 @@ module.exports = async function handler(req, res) {
     }
     if (!Array.isArray(answers) || answers.length !== questionIds.length) {
       res.status(400).json({ error: "invalid_answers" });
+      return;
+    }
+    if (!GameCore.isValidSubjectivePrompt(subjectivePrompt)) {
+      res.status(400).json({ error: "invalid_subjective_prompt" });
+      return;
+    }
+    if (!subjectiveAnswer) {
+      res.status(400).json({ error: "missing_subjective_answer" });
       return;
     }
     const questions = GameCore.getQuestionsByIds(questionIds);
@@ -89,6 +100,8 @@ module.exports = async function handler(req, res) {
       createdAt: Date.now(),
       questionIds: JSON.stringify(questionIds),
       answers: JSON.stringify(answers),
+      subjectivePrompt: subjectivePrompt,
+      subjectiveAnswer: subjectiveAnswer,
       ownerToken: ownerToken,
       attemptCount: 0,
     });
