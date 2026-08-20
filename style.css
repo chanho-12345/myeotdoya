@@ -462,6 +462,21 @@ body.depth-3 { background: var(--bg-depth-3); }
 .advice-partner .advice-name { color: var(--partner-accent); }
 .reveal-line { display: block; opacity: 0; animation: fadeUp .35s ease forwards; }
 
+/* 전체 문제 하나하나 비교 (관계 리플레이 상세) */
+.qa-list { display: grid; gap: 8px; margin-top: 4px; }
+.qa-row {
+  background: #fff; border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px; opacity: 0; animation: fadeUp .4s ease forwards;
+}
+.qa-row-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+.qa-cat { font-size: 11px; font-weight: 700; color: var(--ink-muted); }
+.qa-flag { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; }
+.qa-flag-correct { color: var(--pink); background: var(--pink-tint); }
+.qa-flag-wrong { color: var(--ink-muted); background: #f2efe9; }
+.qa-text { font-size: 13.5px; font-weight: 700; color: var(--ink); line-height: 1.5; margin-bottom: 5px; }
+.qa-answer { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+.qa-answer b { color: var(--ink); }
+
 .element-tip-card {
   background: var(--ink);
   border-radius: 16px; padding: 16px 18px;
