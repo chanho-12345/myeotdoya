@@ -88,8 +88,11 @@
       '<div class="q-text" style="text-align:center;">' + escapeHtml(data.creatorNickname) + "의 테스트</div>" +
       '<p class="banner">' + (data.attemptCount > 0 ? "지금까지 " + data.attemptCount + "명이 참여했어요." : escapeHtml(tierMsg)) + "</p>" +
       '<div class="field"><input id="shareUrlInput" type="text" readonly value="' + escapeHtml(shareUrl) + '"/></div>' +
-      '<button class="btn btn-primary" id="copyBtn">공유 링크 복사하기</button>' +
-      (data.ranking && data.ranking.length ? '<div class="section-title">' + escapeHtml(data.creatorNickname) + '를 제일 잘 아는 사람</div>' + rankingHtml(data.ranking) : "") +
+      '<button class="btn btn-primary" id="copyBtn">친구에게 도전장 보내기</button>' +
+      (data.ranking && data.ranking.length
+        ? '<p class="banner" style="margin-top:18px;">과연 애인이 1등일까, 10년 친구가 1등일까?</p>' +
+          '<div class="section-title">' + escapeHtml(data.creatorNickname) + '를 제일 잘 아는 사람</div>' + rankingHtml(data.ranking)
+        : "") +
       miscountHtml +
       '<p class="footer-note">이 페이지는 나만 볼 수 있는 페이지예요. 이 링크는 저장해두고, 친구들에겐 위의 공유 링크만 보내주세요.</p>';
 
@@ -216,7 +219,7 @@
     progressFill.style.width = "100%";
     progressLabel.textContent = TOTAL_STEPS + " / " + TOTAL_STEPS;
     stageEl.innerHTML =
-      '<p class="banner" style="margin-bottom:14px;">마지막은 찍을 수 없는 문제.</p>' +
+      '<p class="banner" style="margin-bottom:14px;">마지막은 찍어서 맞힐 수 없어.</p>' +
       '<div class="q-index">Q10 · 주관식</div>' +
       '<div class="q-text">' + escapeHtml(data.creatorNickname) + "라면?<br/>" + escapeHtml(data.subjectivePrompt) + "</div>" +
       '<div class="field"><input id="subjInput" type="text" maxlength="80" placeholder="솔직하게, 짧게 예상해보세요"/></div>' +
@@ -280,11 +283,14 @@
       '<p style="text-align:center;font-weight:800;margin:2px 0 4px;">' + escapeHtml(data.creatorNickname) + " 이해도 " + result.score + "%</p>" +
       '<p style="text-align:center;font-size:13.5px;color:var(--ink-2);margin:0 0 18px;line-height:1.6;">' + escapeHtml(result.oneLiner) + "</p>" +
       surfaceInnerBarsHtml(result.surfaceScore, result.innerScore) +
-      (showRanking ? '<div class="section-title">' + escapeHtml(data.creatorNickname) + '를 제일 잘 아는 사람</div>' + rankingHtml(ranking, nickname) : "") +
+      (showRanking
+        ? '<p class="banner" style="margin-top:18px;">이 점수보다 ' + escapeHtml(data.creatorNickname) + '를 더 잘 아는 사람이 있을까?</p>' +
+          '<div class="section-title">' + escapeHtml(data.creatorNickname) + '를 제일 잘 아는 사람</div>' + rankingHtml(ranking, nickname)
+        : "") +
       '<div class="locked" id="adGateBox">' +
       '<div style="font-weight:800;font-size:14.5px;margin-bottom:6px;">우리가 엇갈린 순간</div>' +
-      "<ul><li>점수보다 재미있는 이야기가 하나 있어요</li><li>가장 크게 엇갈린 부분과 확신했는데 틀린 답</li><li>주관식 답변이 얼마나 비슷했는지도 같이 보여드려요</li></ul>" +
-      '<button class="btn btn-primary unlock-btn" id="watchAdBtn">15초 보고 확인하기</button>' +
+      "<ul><li>가장 잘 안다고 확신한 문제에서 오히려 크게 빗나갔을 수도 있어요</li><li>취향은 거의 다 맞혔는데 속마음에서는 반복해서 엇갈렸을 수도 있고요</li><li>주관식 답변이 얼마나 비슷했는지도 같이 보여드려요</li></ul>" +
+      '<button class="btn btn-primary unlock-btn" id="watchAdBtn">15초 보고 관계 리플레이 열기</button>' +
       "</div>" +
       '<div class="section-title">그런데 ' + escapeHtml(data.creatorNickname) + '는 나를 얼마나 알까?</div>' +
       '<div class="cta-fixed"><a class="btn btn-ghost" href="./create.html" id="reverseCta">이번엔 내 테스트 만들기 →</a></div>';
