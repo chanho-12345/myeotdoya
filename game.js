@@ -575,9 +575,35 @@
       delay = base2 + 1000;
     }
 
+    // 요약만으론 부족하다는 피드백 반영 — 9문제 전부 맞았는지/틀렸는지랑
+    // 내 예상 vs 실제 답을 하나하나 다 비교해서 보여줌.
+    var qaListHtml = "";
+    if (detail.perQuestion && detail.perQuestion.length) {
+      var qaBase = delay;
+      var qaRows = detail.perQuestion.map(function (q, i) {
+        var d = qaBase + Math.min(i, 10) * 40;
+        var flag = q.correct
+          ? '<span class="qa-flag qa-flag-correct">정답</span>'
+          : '<span class="qa-flag qa-flag-wrong">다르게 답함</span>';
+        var answerLine = q.correct
+          ? "정답: <b>" + escapeHtml(q.actualAnswer) + "</b>"
+          : "내 예상: " + escapeHtml(q.myGuess) + " · 실제 답: <b>" + escapeHtml(q.actualAnswer) + "</b>";
+        return (
+          '<div class="qa-row" style="animation-delay:' + d + 'ms;">' +
+          '<div class="qa-row-top"><span class="qa-cat">' + escapeHtml(q.category) + "</span>" + flag + "</div>" +
+          '<div class="qa-text">' + escapeHtml(q.text) + "</div>" +
+          '<div class="qa-answer">' + answerLine + "</div>" +
+          "</div>"
+        );
+      }).join("");
+      delay = qaBase + Math.min(detail.perQuestion.length, 10) * 40 + 200;
+      qaListHtml = '<div class="section-title">전체 문제 비교</div><div class="qa-list">' + qaRows + "</div>";
+    }
+
     box.outerHTML =
       '<div class="section-title">우리가 엇갈린 순간</div>' +
       blocks.join("") +
+      qaListHtml +
       '<p class="mini-note" style="animation-delay:' + (delay + 100) + 'ms;">' + escapeHtml(detail.oneLiner || "") + "</p>";
   }
 
