@@ -142,12 +142,31 @@
       var sel = guesses[idx] === i ? " selected" : "";
       return '<button class="opt' + sel + '" data-i="' + i + '">' + escapeHtml(opt) + "</button>";
     }).join("");
+
+    // deep(3단계) 질문은 답 고른 다음 "얼마나 확신해?"도 같이 물어보는데,
+    // 별도 화면으로 넘기지 않고 같은 페이지 안에서 아래에 이어서 보여줌 —
+    // 질문 개수가 줄어드는 것처럼 느껴지지 않게 하고, 뒤로가기도 그대로 쓸 수 있게 함.
+    var isDeep = q.depth === "deep";
+    var confidenceHtml = "";
+    if (isDeep && guesses[idx] !== null) {
+      var pillsHtml = ["guess", "half", "sure"].map(function (v) {
+        var sel = confidence[idx] === v ? " selected" : "";
+        return '<button class="pill' + sel + '" data-v="' + v + '">' + DEEP_CONFIDENCE_LABEL[v] + "</button>";
+      }).join("");
+      confidenceHtml =
+        '<p style="font-size:14px;font-weight:800;color:var(--ink);margin:18px 0 10px;">이 답, 얼마나 확신해?</p>' +
+        '<div class="pill-group" id="confPills">' + pillsHtml + "</div>";
+    }
+    var showNextBtn = isDeep && guesses[idx] !== null && confidence[idx] !== null;
+
     stageEl.innerHTML =
       backHtml +
       (banner ? '<p class="banner" style="margin-bottom:14px;">' + escapeHtml(banner) + "</p>" : "") +
       '<div class="q-index">Q' + (idx + 1) + "</div>" +
       '<div class="q-text">' + escapeHtml(data.creatorNickname) + "라면?<br/>" + escapeHtml(q.text) + "</div>" +
-      '<div class="opt-list">' + optsHtml + "</div>";
+      '<div class="opt-list">' + optsHtml + "</div>" +
+      confidenceHtml +
+      (showNextBtn ? '<button class="btn btn-primary" id="nextBtn" style="margin-top:18px;">다음 →</button>' : "");
 
     var backBtn = document.getElementById("backBtn");
     if (backBtn) {
@@ -155,43 +174,33 @@
         if (idx === 0) { renderIntro(data); } else { renderQuestion(data, idx - 1); }
       });
     }
-    Array.prototype.forEach.call(stageEl.querySelectorAll(".opt"), function (btn) {
+    Array.prototype.forEach.call(stageEl.querySelectorAll(".opt-list .opt"), function (btn) {
       btn.addEventListener("click", function () {
         var i = parseInt(btn.getAttribute("data-i"), 10);
+        if (isDeep && guesses[idx] !== i) {
+          confidence[idx] = null; // 답을 바꾸면 확신도도 그 답 기준으로 다시 골라야 함
+        }
         guesses[idx] = i;
-        Array.prototype.forEach.call(stageEl.querySelectorAll(".opt"), function (b) { b.classList.remove("selected"); });
-        btn.classList.add("selected");
-        setTimeout(function () {
-          if (q.depth === "deep") {
-            renderConfidence(data, idx);
-          } else {
-            advanceFrom(data, idx);
-          }
-        }, 220);
+        if (isDeep) {
+          // 같은 페이지 그대로, 확신 선택지만 새로 드러나도록 다시 그림
+          renderQuestion(data, idx);
+        } else {
+          Array.prototype.forEach.call(stageEl.querySelectorAll(".opt"), function (b) { b.classList.remove("selected"); });
+          btn.classList.add("selected");
+          setTimeout(function () { advanceFrom(data, idx); }, 220);
+        }
       });
     });
-  }
-
-  function renderConfidence(data, idx) {
-    var q = data.questions[idx];
-    stageEl.innerHTML =
-      '<div class="q-index">Q' + (idx + 1) + "</div>" +
-      '<div class="q-text">' + escapeHtml(q.text) + "</div>" +
-      '<p style="font-size:14px;font-weight:800;color:var(--ink);margin:14px 0 12px;">이 답, 얼마나 확신해?</p>' +
-      '<div class="pill-group" id="confPills">' +
-      ["guess", "half", "sure"].map(function (v) {
-        return '<button class="pill" data-v="' + v + '">' + DEEP_CONFIDENCE_LABEL[v] + "</button>";
-      }).join("") +
-      "</div>";
-
-    Array.prototype.forEach.call(stageEl.querySelectorAll(".pill"), function (btn) {
+    Array.prototype.forEach.call(stageEl.querySelectorAll("#confPills .pill"), function (btn) {
       btn.addEventListener("click", function () {
         confidence[idx] = btn.getAttribute("data-v");
-        Array.prototype.forEach.call(stageEl.querySelectorAll(".pill"), function (b) { b.classList.remove("selected"); });
-        btn.classList.add("selected");
-        setTimeout(function () { advanceFrom(data, idx); }, 220);
+        renderQuestion(data, idx);
       });
     });
+    var nextBtn = document.getElementById("nextBtn");
+    if (nextBtn) {
+      nextBtn.addEventListener("click", function () { advanceFrom(data, idx); });
+    }
   }
 
   function advanceFrom(data, idx) {
