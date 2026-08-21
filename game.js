@@ -255,21 +255,67 @@
         "</div>";
     }
 
+    var peopleTitle = report.people.length <= 1 ? "이 사람은 나를 이렇게 알고 있어" : "사람마다 알고 있는 나는 달랐어";
+    var leaderBannerHtml = "";
+    if (report.categoryLeaders && report.categoryLeaders.length >= 2) {
+      // 같은 사람이 여러 카테고리 1등이면 한 문장으로 묶어줌(같은 이름이 반복되는 걸 방지)
+      var grouped = [];
+      report.categoryLeaders.forEach(function (l) {
+        var g = null;
+        for (var gi = 0; gi < grouped.length; gi++) {
+          if (grouped[gi].nickname === l.nickname) { g = grouped[gi]; break; }
+        }
+        if (g) g.labels.push(l.label); else grouped.push({ nickname: l.nickname, labels: [l.label] });
+      });
+      if (grouped.length >= 2) {
+        var leaderSegs = grouped.map(function (g) {
+          var p1 = GameCore.hasBatchim(g.nickname) ? "은" : "는";
+          var joinedLabel = g.labels.join("·");
+          var p2 = GameCore.hasBatchim(g.labels[g.labels.length - 1]) ? "을" : "를";
+          return escapeHtml(g.nickname) + p1 + " 내 " + escapeHtml(joinedLabel) + p2 + " 제일 잘 알고";
+        });
+        leaderSegs[leaderSegs.length - 1] = leaderSegs[leaderSegs.length - 1].replace(/잘 알고$/, "잘 알아.");
+        leaderBannerHtml = '<p class="banner">' + leaderSegs.join(" ") + "</p>";
+      }
+    }
+
     var peopleHtml = "";
     if (report.people.length) {
       peopleHtml =
-        '<div class="section-title">사람별 나를 아는 방식</div>' +
+        '<div class="section-title">' + peopleTitle + "</div>" +
+        leaderBannerHtml +
         '<div class="people-grid">' +
         report.people.map(function (p) {
+          var catsHtml = p.categories.map(function (c) {
+            return '<span class="people-cat-chip"><b>' + escapeHtml(c.label) + "</b> " + c.rate + "%</span>";
+          }).join("");
+          var uniqueCorrectHtml = p.uniqueCorrect
+            ? '<div class="people-highlight">' +
+              '<span class="people-highlight-tag">' + escapeHtml(p.nickname) + "만 맞힌 내 모습</span>" +
+              escapeHtml(p.uniqueCorrect.text) +
+              '<span class="people-highlight-sub">' + data.attemptCount + "명 중 " + escapeHtml(p.nickname) + "만 맞혔어.</span>" +
+              "</div>"
+            : "";
+          var uniqueWrongHtml = p.uniqueWrong
+            ? '<div class="people-note">여기선 나를 조금 다르게 알고 있었어<br/>다른 사람들은 대부분 맞혔는데 ' + escapeHtml(p.nickname) + "은 이 부분을 다르게 예상했어.</div>"
+            : "";
           return (
-            '<div class="people-card">' +
+            '<div class="people-card" data-attempt-id="' + escapeHtml(p.attemptId) + '" data-nickname="' + escapeHtml(p.nickname) + '">' +
             '<div class="people-top"><span class="people-name">' + escapeHtml(p.nickname) + "</span><span class=\"people-score\">" + p.score + "%</span></div>" +
-            '<div class="people-type">' + escapeHtml(p.type) + "</div>" +
-            '<div class="people-desc">' + escapeHtml(p.typeDesc) + "</div>" +
+            '<div class="people-oneliner">' + escapeHtml(p.oneLiner) + "</div>" +
+            '<div class="people-cats">' + catsHtml + "</div>" +
+            uniqueCorrectHtml +
+            uniqueWrongHtml +
+            '<div class="people-cta">' + escapeHtml(p.nickname) + "가 알고 있는 나 자세히 보기 →</div>" +
             "</div>"
           );
         }).join("") +
         "</div>";
+      if (report.people.length === 1) {
+        peopleHtml +=
+          '<p class="banner" style="margin-top:12px;">사람이 더 참여하면 서로 어떤 부분을 다르게 알고 있는지도 비교할 수 있어.</p>' +
+          '<button class="btn btn-ghost" id="inviteMoreBtn">다른 친구에게 보내기</button>';
+      }
     }
 
     var allRankingHtml =
@@ -296,6 +342,65 @@
     playStageAnim();
 
     bindOwnerShare(shareUrl, data);
+
+    Array.prototype.forEach.call(stageEl.querySelectorAll(".people-card"), function (card) {
+      card.addEventListener("click", function () {
+        var attemptId = card.getAttribute("data-attempt-id");
+        var nickname = card.getAttribute("data-nickname");
+        openPersonDetailSheet(data.gameId, attemptId, nickname);
+      });
+    });
+    var inviteMoreBtn = document.getElementById("inviteMoreBtn");
+    if (inviteMoreBtn) {
+      inviteMoreBtn.addEventListener("click", function () {
+        openShareSheet(shareUrl, data.creatorNickname + "가 나를 얼마나 아는지 테스트해봐!");
+      });
+    }
+  }
+
+  // 사람 카드를 눌렀을 때 그 사람의 상세 결과(관계 리플레이와 동일한 데이터)를
+  // 바텀시트로 보여줌 — 페이지 이동 없이 그 자리에서 열림/닫힘.
+  function openPersonDetailSheet(gameId, attemptId, nickname) {
+    var old = document.getElementById("detailSheetOverlay");
+    if (old) old.remove();
+
+    var overlay = document.createElement("div");
+    overlay.className = "detail-sheet-overlay";
+    overlay.id = "detailSheetOverlay";
+    overlay.innerHTML =
+      '<div class="detail-sheet">' +
+      '<div class="detail-sheet-header"><span>' + escapeHtml(nickname) + "이 알고 있는 나</span><button class=\"detail-sheet-close\" id=\"detailSheetClose\">닫기</button></div>" +
+      '<div class="detail-sheet-body" id="detailSheetBody"><div class="analyzing"><div class="analyzing-spinner"></div><div class="analyzing-title">불러오는 중...</div></div></div>' +
+      "</div>";
+    document.body.appendChild(overlay);
+    requestAnimationFrame(function () { overlay.classList.add("show"); });
+
+    function close() {
+      overlay.classList.remove("show");
+      setTimeout(function () { overlay.remove(); }, 220);
+    }
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
+    document.getElementById("detailSheetClose").addEventListener("click", close);
+
+    fetch("/api/attempt-detail?gameId=" + encodeURIComponent(gameId) + "&attemptId=" + encodeURIComponent(attemptId))
+      .then(function (r) {
+        if (!r.ok) throw new Error("not_found");
+        return r.json();
+      })
+      .then(function (detail) {
+        var body = document.getElementById("detailSheetBody");
+        if (!body) return;
+        var built = buildReplayContentHtml(detail);
+        body.innerHTML =
+          '<div class="score-big" style="padding:0 0 4px;"><div class="num" style="font-size:38px;">' + detail.score + "%</div><div class=\"cap\">" + escapeHtml(detail.scoreCopy || "") + "</div></div>" +
+          surfaceInnerBarsHtml(detail.surfaceScore, detail.innerScore) +
+          built.html +
+          '<p class="mini-note" style="opacity:1;">' + escapeHtml(built.oneLiner) + "</p>";
+      })
+      .catch(function () {
+        var body = document.getElementById("detailSheetBody");
+        if (body) body.innerHTML = '<p style="text-align:center;color:var(--warn);">불러오지 못했어요.</p>';
+      });
   }
 
   function bindOwnerShare(shareUrl, data) {
