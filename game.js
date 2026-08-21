@@ -184,7 +184,32 @@
       return;
     }
 
-    var newTopHtml = newTopBannerHtml(data.gameId, report);
+    var changeInfo = computeChangeEvents(data.gameId, report, data.attemptCount);
+    var changeBannerHtml = "";
+    if (!changeInfo.isFirstVisit && changeInfo.newCount > 0) {
+      changeBannerHtml =
+        '<div class="change-banner">' +
+        '<p class="change-banner-title">지난번 이후 ' + changeInfo.newCount + "명이 새로 도전했어.</p>" +
+        (changeInfo.events.length
+          ? '<ul class="change-list">' + changeInfo.events.map(function (e) { return "<li>" + escapeHtml(e.text) + "</li>"; }).join("") + "</ul>"
+          : "") +
+        "</div>";
+    }
+
+    var mutualHtml = "";
+    if (report.mutual) {
+      var m = report.mutual;
+      mutualHtml =
+        '<div class="mutual-card">' +
+        '<div class="mutual-title">우리 서로 이해도</div>' +
+        '<div class="mutual-scores">' +
+        '<div class="mutual-score-col"><div class="mutual-score-num">' + m.meUnderstandsThemScore + "%</div><div class=\"mutual-score-label\">" + escapeHtml(m.meNickname) + " → " + escapeHtml(m.themNickname) + "</div></div>" +
+        '<div class="mutual-score-col"><div class="mutual-score-num">' + m.themUnderstandsMeScore + "%</div><div class=\"mutual-score-label\">" + escapeHtml(m.themNickname) + " → " + escapeHtml(m.meNickname) + "</div></div>" +
+        "</div>" +
+        '<div class="mutual-avg">서로 이해도 ' + m.mutualScore + "%</div>" +
+        (m.comparisonLine ? '<p class="mutual-compare">' + escapeHtml(m.comparisonLine) + "</p>" : "") +
+        "</div>";
+    }
 
     var summaryHtml =
       '<div class="q-text" style="text-align:center;">' + escapeHtml(data.creatorNickname) + "의 관계 리포트</div>" +
@@ -194,10 +219,20 @@
         : "") +
       "</p>";
 
-    var rankingSection =
-      data.ranking && data.ranking.length
-        ? '<div class="section-title">' + escapeHtml(data.creatorNickname) + "를 제일 잘 아는 사람 TOP3</div>" + rankingHtml(data.ranking.slice(0, 3))
-        : "";
+    var rankingSection = "";
+    if (report.people.length) {
+      var top3 = report.people.slice(0, 3);
+      var top3Rows = top3.map(function (p, i) {
+        var medal = i === 0 ? "1위" : i === 1 ? "2위" : "3위";
+        var cls = "lb-row" + (i === 0 ? " lb-row-first" : "");
+        return (
+          '<div class="' + cls + '"><div class="lb-rank">' + medal + "</div>" +
+          '<div class="lb-names">' + escapeHtml(p.nickname) + '<span class="lb-trait">' + escapeHtml(p.shortTrait) + "</span></div>" +
+          '<div class="lb-score">' + p.score + "%</div></div>"
+        );
+      }).join("");
+      rankingSection = '<div class="section-title">누가 ' + escapeHtml(data.creatorNickname) + '를 제일 잘 알까</div><div class="lb-list">' + top3Rows + "</div>";
+    }
 
     var knownSection = "";
     if (report.knownCategories.length || report.unknownCategories.length) {
@@ -220,11 +255,11 @@
     var misHtml = "";
     if (report.misunderstandings.length) {
       misHtml =
-        '<div class="section-title">친구들의 공통 오해</div>' +
+        '<div class="section-title">사람들이 생각하는 나와 실제 나는 어디서 다를까?</div>' +
         report.misunderstandings.map(function (m) {
           return (
             '<div class="advice-bubble advice-partner">' +
-            '<span class="advice-name">총 ' + m.total + "명 중 " + m.count + "명이 이렇게 예상했어요</span>“" +
+            '<span class="advice-name">' + escapeHtml(m.label) + " · 총 " + m.total + "명 중 " + m.count + "명</span>“" +
             escapeHtml(m.guessedAnswer) + "”" +
             '<span class="reveal-line">근데 실제 내 답은 “<b>' + escapeHtml(m.actualAnswer) + "</b>”이었어요.</span>" +
             "</div>"
@@ -328,7 +363,8 @@
       '<button class="btn btn-primary cta-pulse-once" id="copyBtn">친구에게 링크 보내기</button>';
 
     stageEl.innerHTML =
-      newTopHtml +
+      changeBannerHtml +
+      mutualHtml +
       summaryHtml +
       rankingSection +
       knownSection +
@@ -412,22 +448,70 @@
     }
   }
 
-  // 최고 점수가 바뀐 걸 감지해서 "새로운 1위 등장" 배너를 짧게 보여줌 (클라이언트 전용, 과한 연출 없이)
-  function newTopBannerHtml(gameId, report) {
-    if (!report.topNickname || report.topScore == null) return "";
-    var key = "myeotdoya_seen_top_" + gameId;
+  // 지난 방문 이후 뭐가 달라졌는지(참여자 증가, 새 1위, 평균 변화, 새 공통 오해,
+  // 처음 맞힌 문제, 카테고리 리더 교체, 새로운 unique-correct)를 로컬에 저장해둔
+  // 스냅샷과 비교해서 "change_event" 목록으로 만들어줌. 서버에 따로 저장하지 않고
+  // 이 브라우저에서 마지막으로 본 상태만 기억하는 방식이라 로그인이 필요 없음.
+  function computeChangeEvents(gameId, report, attemptCount) {
+    var key = "myeotdoya_report_snapshot_" + gameId;
     var prev = null;
     try { prev = JSON.parse(localStorage.getItem(key) || "null"); } catch (e) { prev = null; }
-    var html = "";
-    if (prev && (report.topScore > prev.score || (report.topScore === prev.score && report.topNickname !== prev.nickname))) {
-      html =
-        '<div class="banner banner-highlight">' +
-        "<b>새로운 1위 등장!</b><br/>" +
-        escapeHtml(prev.nickname) + " " + prev.score + "% → <b>" + escapeHtml(report.topNickname) + " " + report.topScore + "%</b>" +
-        "</div>";
+
+    var current = {
+      attemptCount: attemptCount,
+      avgScore: report.avgScore,
+      topScore: report.topScore,
+      topNickname: report.topNickname,
+      misKeys: (report.misunderstandings || []).map(function (m) { return m.text; }),
+      categoryLeaders: {},
+      uniqueCorrectKeys: [],
+      questionCorrectCounts: {},
+    };
+    (report.categoryLeaders || []).forEach(function (l) { current.categoryLeaders[l.category] = l.nickname; });
+    (report.people || []).forEach(function (p) {
+      if (p.uniqueCorrect) current.uniqueCorrectKeys.push(p.nickname + "::" + p.uniqueCorrect.text);
+    });
+    (report.questionStats || []).forEach(function (q) { current.questionCorrectCounts[q.idx] = q.correctCount; });
+
+    var events = [];
+    if (prev && current.attemptCount > prev.attemptCount) {
+      if (current.topNickname && (current.topScore > prev.topScore || (current.topScore === prev.topScore && current.topNickname !== prev.topNickname))) {
+        events.push({ type: "new_rank_1", text: "새로운 1위가 등장했어 — " + current.topNickname + " " + current.topScore + "% (이전 " + (prev.topNickname || "-") + " " + prev.topScore + "%)" });
+      }
+      if (typeof prev.avgScore === "number" && current.avgScore !== prev.avgScore) {
+        var diff = current.avgScore - prev.avgScore;
+        events.push({
+          type: diff > 0 ? "average_score_up" : "average_score_down",
+          text: "평균 이해도가 " + (diff > 0 ? "올랐어" : "내려갔어") + " — " + prev.avgScore + "% → " + current.avgScore + "%",
+        });
+      }
+      current.misKeys.forEach(function (k) {
+        if (prev.misKeys && prev.misKeys.indexOf(k) === -1) {
+          events.push({ type: "new_common_misunderstanding", text: "새롭게 발견된 생각 차이가 있어" });
+        }
+      });
+      Object.keys(current.questionCorrectCounts).forEach(function (idx) {
+        var prevCount = prev.questionCorrectCounts ? prev.questionCorrectCounts[idx] : 0;
+        if (current.questionCorrectCounts[idx] >= 1 && !prevCount) {
+          events.push({ type: "first_correct_answer", text: "처음으로 누군가 맞힌 문제가 생겼어" });
+        }
+      });
+      Object.keys(current.categoryLeaders).forEach(function (cat) {
+        if (prev.categoryLeaders && prev.categoryLeaders[cat] && prev.categoryLeaders[cat] !== current.categoryLeaders[cat]) {
+          events.push({ type: "new_category_leader", text: current.categoryLeaders[cat] + "가 " + GameCore.categoryLabel(cat) + "을(를) 가장 잘 아는 사람으로 바뀌었어" });
+        }
+      });
+      current.uniqueCorrectKeys.forEach(function (k) {
+        if (prev.uniqueCorrectKeys && prev.uniqueCorrectKeys.indexOf(k) === -1) {
+          var nick = k.split("::")[0];
+          events.push({ type: "unique_correct_answer", text: nick + "만 맞힌 문제가 새로 생겼어" });
+        }
+      });
     }
-    try { localStorage.setItem(key, JSON.stringify({ nickname: report.topNickname, score: report.topScore })); } catch (e) {}
-    return html;
+
+    var newCount = prev ? Math.max(0, current.attemptCount - prev.attemptCount) : 0;
+    try { localStorage.setItem(key, JSON.stringify(current)); } catch (e) {}
+    return { events: events.slice(0, 3), newCount: newCount, isFirstVisit: !prev };
   }
 
   // ---------- 응답자: 인트로 / 질문 ----------
@@ -697,6 +781,18 @@
     requestAnimationFrame(step);
   }
 
+  // "역도전" 링크 — 랜딩 페이지를 거치지 않고 바로 테스트 생성 흐름으로 들어가게,
+  // 그리고 이미 알고 있는 정보(내 닉네임, 원본 게임/시도, 상대 닉네임)를 다시 묻지
+  // 않도록 쿼리로 같이 넘겨줌.
+  function buildReverseUrl(data, result, nickname) {
+    return (
+      "./create.html?reverseGameId=" + encodeURIComponent(data.gameId) +
+      "&reverseAttemptId=" + encodeURIComponent(result.attemptId || "") +
+      "&reverseCreatorNickname=" + encodeURIComponent(data.creatorNickname || "") +
+      "&nickname=" + encodeURIComponent(nickname || "")
+    );
+  }
+
   function renderResultView(data, result, ranking) {
     progressWrap.style.display = "none";
     resetDepthBg();
@@ -712,7 +808,6 @@
       '<p class="result-oneliner" style="text-align:center;font-weight:800;margin:14px 0 4px;">' + escapeHtml(data.creatorNickname) + " 이해도 " + result.score + "%</p>" +
       '<p class="result-oneliner" style="text-align:center;font-size:13.5px;color:var(--ink-2);margin:0 0 18px;line-height:1.6;animation-delay:1.05s;">' + escapeHtml(result.oneLiner) + "</p>" +
       surfaceInnerBarsHtml(result.surfaceScore, result.innerScore) +
-      '<button class="btn btn-ghost" id="shareResultBtn" style="margin-top:6px;">내 결과 공유하기</button>' +
       (showRanking
         ? '<p class="banner" style="margin-top:18px;">이 점수보다 ' + escapeHtml(data.creatorNickname) + '를 더 잘 아는 사람이 있을까?</p>' +
           '<div class="section-title">' + escapeHtml(data.creatorNickname) + '를 제일 잘 아는 사람</div>' + rankingHtml(ranking, nickname)
@@ -722,9 +817,12 @@
       "<ul><li>가장 잘 안다고 확신한 문제에서 오히려 크게 빗나갔을 수도 있어요</li><li>취향은 거의 다 맞혔는데 속마음에서는 반복해서 엇갈렸을 수도 있고요</li><li>주관식 답변이 얼마나 비슷했는지도 같이 보여드려요</li></ul>" +
       '<button class="btn btn-primary unlock-btn" id="watchAdBtn">15초 보고 관계 리플레이 열기</button>' +
       "</div>" +
-      '<div class="section-title">그런데 ' + escapeHtml(data.creatorNickname) + '는 나를 얼마나 알까?</div>' +
+      '<div class="reverse-beat">' +
+      '<p class="reverse-beat-line1">넌 ' + escapeHtml(data.creatorNickname) + "를 " + score + "% 알고 있었어.</p>" +
+      '<p class="reverse-beat-line2">그런데 반대로,<br/>' + escapeHtml(data.creatorNickname) + "는 널 몇 % 알고 있을까?</p>" +
+      "</div>" +
       '<div class="swap-connector" aria-hidden="true"><span class="dot a"></span><span class="line"></span><span class="dot b"></span></div>' +
-      '<div class="cta-fixed"><a class="btn btn-ghost cta-pulse-once" href="./create.html" id="reverseCta">이번엔 내 테스트 만들기 →</a></div>';
+      '<div class="cta-fixed"><a class="btn btn-primary cta-pulse-once" href="' + escapeHtml(buildReverseUrl(data, result, nickname)) + '" id="reverseCta">이번엔 ' + escapeHtml(data.creatorNickname) + "가 나를 맞혀보게 하기 →</a></div>";
     playStageAnim();
 
     animateScoreCountUp(score);
@@ -755,13 +853,9 @@
     var reverseCta = document.getElementById("reverseCta");
     if (reverseCta) reverseCta.addEventListener("click", function () { track("reverse_challenge_click"); });
 
-    var shareResultBtn = document.getElementById("shareResultBtn");
-    if (shareResultBtn) {
-      shareResultBtn.addEventListener("click", function () {
-        var resultShareUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId) + "&result=" + encodeURIComponent(result.attemptId);
-        openShareSheet(resultShareUrl, "나는 " + data.creatorNickname + " 테스트에서 " + score + "% 나왔어! 결과 보러 와줘");
-      });
-    }
+    // "내 결과 공유하기"는 광고(관계 리플레이 언락)를 실제로 본 뒤에만 노출함 — 그 전에 공유
+    // 링크를 만들면 받는 사람이 광고 없이도 잠긴 콘텐츠(관계 리플레이)를 그대로 볼 수 있어서,
+    // 광고를 본 뒤 나오는 "이 결과 친구에게 공유하기"(renderReplay 안)만 남겨둠.
 
     document.getElementById("watchAdBtn").addEventListener("click", function () {
       handleWatchAd(data, result);
