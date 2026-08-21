@@ -96,40 +96,151 @@ module.exports = async function handler(req, res) {
     // 랭킹은 익명이 아니라서(스펙 원칙) 참여자 누구에게나 노출 — 2명 이상일 때
     // 보여줄지는 화면(클라이언트) 쪽에서 결정하고, 여기선 항상 계산해서 내려줌.
     let ranking = [];
+    let idsInOrder = [];
+    let attemptById = {};
     if (attemptCount > 0) {
       const raw = await redis.zrange("game:" + gameId + ":ranking", 0, 9, { rev: true, withScores: true });
-      const idsInOrder = [];
       const scoreById = {};
       for (let i = 0; i < raw.length; i += 2) {
         idsInOrder.push(raw[i]);
         scoreById[raw[i]] = Number(raw[i + 1]);
       }
-      const nicknames = await Promise.all(
+      // owner 화면(관계 리포트)에서는 상위 응답자들의 카테고리별 정답 여부까지 필요해서
+      // hgetall로 한 번에 받아두고, 응답 자체에는 닉네임/점수만 내려줌.
+      const attempts = await Promise.all(
         idsInOrder.map(function (id) {
-          return redis.hget("attempt:" + id, "nickname");
+          return redis.hgetall("attempt:" + id);
         })
       );
+      attempts.forEach(function (a, i) {
+        attemptById[idsInOrder[i]] = a;
+      });
       ranking = idsInOrder.map(function (id, i) {
-        return { nickname: nicknames[i] || "익명", score: scoreById[id] };
+        const a = attempts[i];
+        return { nickname: (a && a.nickname) || "익명", score: scoreById[id] };
       });
     }
 
-    // "친구들이 가장 헷갈린 내 모습" — 생성자 전용, 5명 이상 모였을 때만
-    let miscount = null;
-    if (isOwner && attemptCount >= 5) {
-      const raw = await redis.hgetall("game:" + gameId + ":miscount");
-      const entries = [];
-      if (raw) {
-        Object.keys(raw).forEach(function (key) {
-          const idx = parseInt(key.replace("q", ""), 10);
-          const q = questions[idx];
-          if (q) {
-            entries.push({ category: GameCore.categoryLabel(q.category), text: q.text, missCount: Number(raw[key] || 0) });
+    // "관계 리포트" — 생성자 전용. 개별 응답자를 특정할 수 없도록 집계 데이터만 사용하고,
+    // 타입 문구는 AI 추측이 아니라 실제 카테고리별 정답 데이터로만 결정함.
+    let report = null;
+    if (isOwner && attemptCount > 0) {
+      const creatorAnswers = safeParseField(game.answers, []);
+
+      // 평균 이해도 — 상위 10명만이 아니라 전체 응답자 기준으로 계산
+      let avgScore = 0;
+      try {
+        const allScores = await redis.zrange("game:" + gameId + ":ranking", 0, -1, { withScores: true });
+        let sum = 0, n = 0;
+        for (let i = 0; i < allScores.length; i += 2) {
+          sum += Number(allScores[i + 1]);
+          n += 1;
+        }
+        avgScore = n ? Math.round(sum / n) : 0;
+      } catch (e) {
+        avgScore = ranking.length ? Math.round(ranking.reduce((s, r) => s + r.score, 0) / ranking.length) : 0;
+      }
+
+      // 사람별 "나를 아는 방식" — 실제 카테고리 정답 데이터로만 타입을 정함(추측 금지)
+      const people = idsInOrder
+        .map(function (id) {
+          const a = attemptById[id];
+          if (!a || !a.nickname) return null;
+          const flags = safeParseField(a.correctFlags, []);
+          const catTotal = {}, catCorrect = {};
+          questions.forEach(function (q, qi) {
+            catTotal[q.category] = (catTotal[q.category] || 0) + 1;
+            if (flags[qi]) catCorrect[q.category] = (catCorrect[q.category] || 0) + 1;
+          });
+          const typeInfo = GameCore.typeFromCategoryScores(catCorrect, catTotal);
+          return { nickname: a.nickname, score: Number(a.score || 0), type: typeInfo.type, typeDesc: typeInfo.desc };
+        })
+        .filter(Boolean);
+
+      // 문항별 정답률(전체 응답자 기준, miscount 해시로 계산 — 개인 특정 불가)
+      const miscountRaw = (await redis.hgetall("game:" + gameId + ":miscount")) || {};
+      const perQ = questions.map(function (q, i) {
+        const miss = Number(miscountRaw["q" + i] || 0);
+        const correct = Math.max(0, attemptCount - miss);
+        return {
+          idx: i,
+          category: q.category,
+          label: GameCore.categoryLabel(q.category),
+          text: q.text,
+          actualAnswer: q.options[creatorAnswers[i]] || "",
+          rate: attemptCount ? correct / attemptCount : 0,
+        };
+      });
+
+      // 카테고리별 집계(전체 응답자 기준) — "잘 아는 나 vs 잘 모르는 나"
+      const catAgg = {};
+      perQ.forEach(function (pq) {
+        if (!catAgg[pq.category]) catAgg[pq.category] = { sum: 0, n: 0, label: pq.label };
+        catAgg[pq.category].sum += pq.rate;
+        catAgg[pq.category].n += 1;
+      });
+      const catList = Object.keys(catAgg).map(function (cat) {
+        const c = catAgg[cat];
+        return { category: cat, label: c.label, rate: c.n ? Math.round((c.sum / c.n) * 100) : 0 };
+      });
+      catList.sort(function (a, b) { return b.rate - a.rate; });
+
+      let knownCategories = [];
+      let unknownCategories = [];
+      if (attemptCount >= 3 && catList.length >= 2) {
+        const half = Math.max(1, Math.min(2, Math.floor(catList.length / 2)));
+        knownCategories = catList.slice(0, half);
+        unknownCategories = catList.slice(catList.length - half).reverse();
+      }
+
+      // "친구들의 공통 오해" — 같은 오답을 3명 이상 골랐을 때만, 집계 카운트만 사용
+      // (누가 그 답을 골랐는지는 절대 노출하지 않음)
+      let misunderstandings = [];
+      if (attemptCount >= 3) {
+        const optRaw = (await redis.hgetall("game:" + gameId + ":miscount_opt")) || {};
+        questions.forEach(function (q, i) {
+          let bestOpt = -1, bestCount = 0;
+          q.options.forEach(function (opt, optIdx) {
+            if (optIdx === creatorAnswers[i]) return;
+            const c = Number(optRaw["q" + i + "_" + optIdx] || 0);
+            if (c > bestCount) { bestCount = c; bestOpt = optIdx; }
+          });
+          if (bestOpt !== -1 && bestCount >= 3) {
+            misunderstandings.push({
+              category: GameCore.categoryLabel(q.category),
+              text: q.text,
+              guessedAnswer: q.options[bestOpt],
+              actualAnswer: q.options[creatorAnswers[i]] || "",
+              count: bestCount,
+              total: attemptCount,
+            });
           }
         });
+        misunderstandings.sort(function (a, b) { return b.count - a.count; });
+        misunderstandings = misunderstandings.slice(0, 3);
       }
-      entries.sort(function (a, b) { return b.missCount - a.missCount; });
-      miscount = entries.slice(0, 3);
+
+      // "아무도 잘 모르는 나" / "역시 다 알고 있는 나" — 7명 이상 모였을 때만
+      let hardest = null, easiest = null;
+      if (attemptCount >= 7 && perQ.length) {
+        const sorted = perQ.slice().sort(function (a, b) { return a.rate - b.rate; });
+        const h = sorted[0];
+        const e = sorted[sorted.length - 1];
+        hardest = { category: h.label, text: h.text, actualAnswer: h.actualAnswer, ratePercent: Math.round(h.rate * 100) };
+        easiest = { category: e.label, text: e.text, actualAnswer: e.actualAnswer, ratePercent: Math.round(e.rate * 100) };
+      }
+
+      report = {
+        avgScore: avgScore,
+        topScore: ranking.length ? ranking[0].score : null,
+        topNickname: ranking.length ? ranking[0].nickname : null,
+        people: people.slice(0, 10),
+        knownCategories: knownCategories,
+        unknownCategories: unknownCategories,
+        misunderstandings: misunderstandings,
+        hardest: hardest,
+        easiest: easiest,
+      };
     }
 
     res.status(200).json({
@@ -142,7 +253,7 @@ module.exports = async function handler(req, res) {
       alreadyResponded: !!myAttempt,
       myAttempt: myAttempt,
       ranking: ranking,
-      miscount: miscount,
+      report: report,
     });
   } catch (e) {
     res.status(500).json({ error: "server_error", message: e.message });
