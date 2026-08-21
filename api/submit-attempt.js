@@ -206,6 +206,9 @@ module.exports = async function handler(req, res) {
     for (let i = 0; i < result.correctFlags.length; i++) {
       if (!result.correctFlags[i]) {
         await redis.hincrby("game:" + gameId + ":miscount", "q" + i, 1);
+        // 어떤 오답을 얼마나 많이 골랐는지도 집계함 — "친구들의 공통 오해" 계산용.
+        // 누가 그 오답을 골랐는지는 저장하지 않고, 문항×오답 조합의 카운트만 늘림.
+        await redis.hincrby("game:" + gameId + ":miscount_opt", "q" + i + "_" + guesses[i], 1);
       }
     }
 
