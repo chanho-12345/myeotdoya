@@ -201,9 +201,37 @@
 
   // 참여자 수에 따라 생성자에게 보여줄 상태 문구
   function creatorTierMessage(count) {
-    if (count <= 0) return "아직 아무도 도전 안 했어요. 링크를 공유해보세요!";
+    if (count <= 0) return "아직 아무도 안 해봤어요. 링크를 공유해보세요!";
     if (count < 5) return "참여자가 5명 모이면 \"친구들이 가장 헷갈린 내 모습\"이 열려요.";
     return "친구들이 가장 헷갈린 내 모습을 확인할 수 있어요.";
+  }
+
+  // 사람별 "나를 아는 방식" 타입 — AI가 관계를 추측하지 않고, 실제 카테고리별
+  // 정답 데이터(categoryCorrect/categoryTotal)만 갖고 규칙 기반으로 결정함.
+  // 여러 카테고리를 묶은 그룹 중 정답률이 가장 높은 그룹을 그 사람의 타입으로 붙임.
+  var TYPE_GROUPS = [
+    { categories: ["daily", "habit"], type: "생활 밀착형", desc: "내 행동 패턴과 평소 습관을 가장 잘 알아요" },
+    { categories: ["taste", "current"], type: "취향 전문가", desc: "내가 뭘 좋아하는지, 요즘 관심사를 잘 알아요" },
+    { categories: ["emotion", "value"], type: "속마음 탐지형", desc: "겉모습보다 내 속마음과 가치관을 더 잘 알아요" },
+    { categories: ["relationship", "memory"], type: "관계 관찰자", desc: "나와의 관계, 지나온 순간들을 잘 기억해요" },
+  ];
+  function typeFromCategoryScores(categoryCorrect, categoryTotal) {
+    var best = null;
+    TYPE_GROUPS.forEach(function (group) {
+      var correct = 0, total = 0;
+      group.categories.forEach(function (cat) {
+        correct += (categoryCorrect && categoryCorrect[cat]) || 0;
+        total += (categoryTotal && categoryTotal[cat]) || 0;
+      });
+      if (total > 0) {
+        var rate = correct / total;
+        if (!best || rate > best.rate || (rate === best.rate && total > best.total)) {
+          best = { rate: rate, total: total, type: group.type, desc: group.desc };
+        }
+      }
+    });
+    if (!best) return { type: "균형 잡힌 관찰자", desc: "여러 부분을 고르게 알고 있어요" };
+    return { type: best.type, desc: best.desc };
   }
 
   // 질문 진행 중 깊이가 올라간다는 걸 알려주는 배너 — idx는 0-based (0~8)
@@ -292,6 +320,7 @@
     titleForScore: titleForScore,
     relationshipOneLiner: relationshipOneLiner,
     creatorTierMessage: creatorTierMessage,
+    typeFromCategoryScores: typeFromCategoryScores,
     depthBannerForIndex: depthBannerForIndex,
     categoryLabel: categoryLabel,
     depthLabel: depthLabel,
