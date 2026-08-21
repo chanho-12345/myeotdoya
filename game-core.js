@@ -234,6 +234,41 @@
     return { type: best.type, desc: best.desc };
   }
 
+  // 한글 단어가 받침으로 끝나는지 (을/를, 이었어/였어 같은 조사 선택용)
+  function hasBatchim(word) {
+    var s = String(word || "").trim();
+    var ch = s.charAt(s.length - 1);
+    var code = ch.charCodeAt(0);
+    if (code < 0xac00 || code > 0xd7a3) return false;
+    return (code - 0xac00) % 28 !== 0;
+  }
+
+  // 한 사람에 대한 "이 사람은 나를 어떻게 알고 있을까" 한 문장 —
+  // 고정 유형명이 아니라 그 사람의 실제 데이터(카테고리 점수, 확신도별 정답률,
+  // 겉/속 점수 차이, 남들은 다 틀렸는데 혼자 맞힌 문제 유무)만 갖고 규칙으로 결정함.
+  // AI 추측 없음.
+  function personOneLiner(stats) {
+    stats = stats || {};
+    if (stats.hasUniqueCorrect) {
+      return "다른 친구들이 다 틀린 걸 혼자 맞힌 사람";
+    }
+    if (stats.sureTotal >= 2 && stats.guessTotal >= 2 && stats.guessRate - stats.sureRate >= 0.25) {
+      return "자신 있게 고른 것보다 찍은 걸 더 잘 맞힌 사람";
+    }
+    if (stats.surfaceScore != null && stats.innerScore != null) {
+      var gap = stats.surfaceScore - stats.innerScore;
+      if (gap >= 20) return "내 행동은 잘 아는데 속마음은 아직 모르는 사람";
+      if (gap <= -20) return "겉모습보다 내 속마음을 더 잘 아는 사람";
+    }
+    if (stats.bestCategory && stats.worstCategory && stats.bestCategory.rate - stats.worstCategory.rate >= 30) {
+      var particle = hasBatchim(stats.bestCategory.label) ? "을" : "를";
+      return "내 " + stats.worstCategory.label + "보다 내 " + stats.bestCategory.label + particle + " 더 잘 아는 사람";
+    }
+    if (stats.score >= 85) return "나를 꽤 정확하게 알고 있는 사람";
+    if (stats.score < 45) return "나를 생각보다 조금 다르게 보고 있는 사람";
+    return "이 사람은 나를 골고루 알고 있어";
+  }
+
   // 질문 진행 중 깊이가 올라간다는 걸 알려주는 배너 — idx는 0-based (0~8)
   function depthBannerForIndex(idx) {
     if (idx === 0) return "가볍게 시작해볼게.";
@@ -321,6 +356,8 @@
     relationshipOneLiner: relationshipOneLiner,
     creatorTierMessage: creatorTierMessage,
     typeFromCategoryScores: typeFromCategoryScores,
+    hasBatchim: hasBatchim,
+    personOneLiner: personOneLiner,
     depthBannerForIndex: depthBannerForIndex,
     categoryLabel: categoryLabel,
     depthLabel: depthLabel,
