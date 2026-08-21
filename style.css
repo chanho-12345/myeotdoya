@@ -571,17 +571,60 @@ body.depth-3 { background: var(--bg-depth-3); }
 .know-item { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 700; color: var(--ink); padding: 4px 0; }
 .know-item b { color: var(--pink); }
 
-/* 관계 리포트: 사람별 나를 아는 방식 */
-.people-grid { display: grid; gap: 8px; margin-top: 4px; }
+/* 관계 리포트: 사람마다 알고 있는 나는 달랐어 */
+.people-grid { display: grid; gap: 10px; margin-top: 4px; }
 .people-card {
-  background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px;
-  opacity: 0; animation: fadeUp .4s ease forwards;
+  background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px;
+  opacity: 0; animation: fadeUp .4s ease forwards; cursor: pointer;
+  transition: border-color .12s ease, transform .1s ease;
 }
-.people-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
-.people-name { font-weight: 800; font-size: 14px; color: var(--ink); }
-.people-score { font-weight: 800; font-size: 13px; color: var(--pink); }
-.people-type { font-size: 12.5px; font-weight: 700; color: var(--partner-accent); margin-bottom: 3px; }
-.people-desc { font-size: 12px; color: var(--ink-muted); line-height: 1.5; }
+.people-card:active { transform: scale(0.98); }
+.people-card:hover { border-color: var(--pink-soft); }
+.people-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.people-name { font-weight: 800; font-size: 14.5px; color: var(--ink); }
+.people-score { font-weight: 800; font-size: 13.5px; color: var(--pink); }
+.people-oneliner { font-size: 14px; font-weight: 700; color: var(--ink); line-height: 1.5; margin-bottom: 10px; }
+.people-cats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.people-cat-chip {
+  font-size: 11.5px; font-weight: 700; color: var(--ink-2);
+  background: #faf8f5; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px;
+}
+.people-cat-chip b { color: var(--ink); font-weight: 800; }
+.people-highlight {
+  margin-top: 10px; background: var(--pink-tint); border: 1px solid var(--pink-soft);
+  border-radius: 12px; padding: 10px 12px; font-size: 13px; font-weight: 700; color: var(--ink); line-height: 1.5;
+}
+.people-highlight-tag { display: block; font-size: 11px; font-weight: 800; color: var(--pink); margin-bottom: 3px; }
+.people-highlight-sub { display: block; font-size: 11.5px; font-weight: 700; color: var(--ink-muted); margin-top: 4px; }
+.people-note {
+  margin-top: 10px; font-size: 12px; color: var(--ink-muted); line-height: 1.6;
+  border-top: 1px dashed var(--line); padding-top: 8px;
+}
+.people-cta { margin-top: 10px; font-size: 12px; font-weight: 700; color: var(--pink); text-align: right; }
+
+/* 사람 카드 클릭 시 상세 결과 바텀시트 */
+.detail-sheet-overlay {
+  position: fixed; inset: 0; background: rgba(31, 27, 23, 0.45);
+  display: flex; align-items: flex-end; justify-content: center;
+  z-index: 999; opacity: 0; transition: opacity .18s ease;
+}
+.detail-sheet-overlay.show { opacity: 1; }
+.detail-sheet {
+  background: var(--bg-1); width: 100%; max-width: 480px; max-height: 84vh;
+  border-radius: 22px 22px 0 0; padding: 0; display: flex; flex-direction: column;
+  transform: translateY(100%); transition: transform .22s ease;
+  box-shadow: 0 -10px 30px rgba(0,0,0,0.15);
+}
+.detail-sheet-overlay.show .detail-sheet { transform: translateY(0); }
+.detail-sheet-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 18px; border-bottom: 1px solid var(--line); font-weight: 800; font-size: 14.5px; color: var(--ink);
+  flex-shrink: 0;
+}
+.detail-sheet-close {
+  background: none; border: none; font-size: 13px; font-weight: 700; color: var(--ink-muted); cursor: pointer; padding: 4px 6px;
+}
+.detail-sheet-body { padding: 16px 18px 26px; overflow-y: auto; }
 
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
