@@ -246,6 +246,14 @@
     }
   }
 
+  // 다른 기기/브라우저에서도 "내가 만든 테스트"를 다시 불러올 수 있게 해주는 복구 코드.
+  function getCreatorKey() {
+    try { return localStorage.getItem("myeotdoya_creator_key") || ""; } catch (e) { return ""; }
+  }
+  function saveCreatorKey(key) {
+    try { if (key) localStorage.setItem("myeotdoya_creator_key", key); } catch (e) {}
+  }
+
   // 만든 테스트를 "내가 만든 테스트" 보관함(로컬 저장)에 남겨서, 나중에 owner 링크를 잃어버려도 찾을 수 있게 함.
   function saveMyTest(gameId, ownerToken, creatorNickname) {
     try {
@@ -352,6 +360,7 @@
         answers: answers,
         subjectivePrompt: subjectivePrompt,
         subjectiveAnswer: subjectiveAnswer,
+        creatorKey: getCreatorKey(),
       }),
     }).then(function (r) { return r.json(); });
 
@@ -361,15 +370,18 @@
         if (!data || !data.gameId) throw new Error("bad response");
         var shareUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId);
         var ownerUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId) + "&owner=" + encodeURIComponent(data.ownerToken);
+        saveCreatorKey(data.creatorKey);
         saveMyTest(data.gameId, data.ownerToken, nickname);
 
         stageEl.innerHTML =
           '<div class="q-text" style="text-align:center;">테스트가 만들어졌어요</div>' +
-          '<p style="font-size:14px;color:var(--ink-2);text-align:center;margin-top:-8px;">아래 링크를 친구들에게 보내서 도전장을 날려보세요.</p>' +
+          '<p style="font-size:14px;color:var(--ink-2);text-align:center;margin-top:-8px;">아래 링크를 친구들에게 보내보세요.</p>' +
           '<div class="field"><input id="shareUrlInput" type="text" readonly value="' + escapeHtml(shareUrl) + '"/></div>' +
           '<button class="btn btn-primary cta-pulse-once" id="copyBtn">친구에게 보내기</button>' +
           '<a class="btn btn-ghost" style="display:block;margin-top:10px;box-sizing:border-box;" href="' + escapeHtml(ownerUrl) + '">내 게임 페이지로 이동 →</a>' +
-          '<p class="footer-note">내 게임 페이지 링크는 나만 가지고 있어야 해요 — 친구들에게는 위의 공유 링크만 보내주세요.<br/><a href="./mytests.html">내가 만든 테스트 목록</a>에서 나중에 다시 찾을 수 있어요.</p>';
+          '<p class="banner" style="margin-top:16px;">✓ 이 페이지, 자동으로 저장해뒀어요. 나중에 홈 화면 "내가 만든 테스트 보기"에서 언제든 다시 찾을 수 있어요.</p>' +
+          '<a class="btn btn-ghost" style="display:block;box-sizing:border-box;" href="./mytests.html">내가 만든 테스트 목록 보기 →</a>' +
+          '<p class="footer-note">내 게임 페이지 링크는 나만 가지고 있어야 해요 — 친구들에게는 위의 공유 링크만 보내주세요.</p>';
         playStageAnim();
 
         document.getElementById("copyBtn").addEventListener("click", function () {
