@@ -100,45 +100,166 @@
       renderError("게임을 찾을 수 없어요. 링크가 정확한지 확인해주세요.");
     });
 
-  // ---------- 생성자 화면 ----------
+  // ---------- 생성자 화면: 관계 리포트 ----------
   function renderOwnerView(data) {
     progressWrap.style.display = "none";
     resetDepthBg();
     var shareUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId);
-    var tierMsg = GameCore.creatorTierMessage(data.attemptCount);
+    var report = data.report;
 
-    var miscountHtml = "";
-    if (data.miscount && data.miscount.length) {
-      miscountHtml =
-        '<div class="section-title">친구들이 가장 헷갈린 내 모습</div>' +
-        '<ul class="feature-list">' +
-        data.miscount.map(function (m) {
-          return "<li><span class=\"ico\">·</span>[" + escapeHtml(m.category) + "] " + escapeHtml(m.text) + " — " + m.missCount + "명이 틀렸어요</li>";
-        }).join("") +
-        "</ul>";
-    } else if (data.attemptCount > 0) {
-      miscountHtml = '<p class="banner">' + escapeHtml(tierMsg) + "</p>";
+    // 아직 아무도 안 했으면 리포트 대신 안내 + 공유 UI만 보여줌
+    if (!data.attemptCount || !report) {
+      var tierMsg = GameCore.creatorTierMessage(data.attemptCount);
+      stageEl.innerHTML =
+        '<div class="q-text" style="text-align:center;">' + escapeHtml(data.creatorNickname) + "의 테스트</div>" +
+        '<p class="banner">' + escapeHtml(tierMsg) + "</p>" +
+        '<div class="field"><input id="shareUrlInput" type="text" readonly value="' + escapeHtml(shareUrl) + '"/></div>' +
+        '<button class="btn btn-primary cta-pulse-once" id="copyBtn">친구에게 링크 보내기</button>' +
+        '<p class="footer-note">이 페이지는 나만 볼 수 있는 페이지예요. 이 링크는 저장해두고, 친구들에겐 위의 공유 링크만 보내주세요.</p>';
+      playStageAnim();
+      bindOwnerShare(shareUrl, data);
+      return;
     }
 
-    stageEl.innerHTML =
-      '<div class="q-text" style="text-align:center;">' + escapeHtml(data.creatorNickname) + "의 테스트</div>" +
-      '<p class="banner">' + (data.attemptCount > 0 ? "지금까지 " + data.attemptCount + "명이 참여했어요." : escapeHtml(tierMsg)) + "</p>" +
-      '<div class="field"><input id="shareUrlInput" type="text" readonly value="' + escapeHtml(shareUrl) + '"/></div>' +
-      '<button class="btn btn-primary cta-pulse-once" id="copyBtn">친구에게 도전장 보내기</button>' +
-      (data.ranking && data.ranking.length
-        ? '<p class="banner" style="margin-top:18px;">과연 애인이 1등일까, 10년 친구가 1등일까?</p>' +
-          '<div class="section-title">' + escapeHtml(data.creatorNickname) + '를 제일 잘 아는 사람</div>' + rankingHtml(data.ranking)
+    var newTopHtml = newTopBannerHtml(data.gameId, report);
+
+    var summaryHtml =
+      '<div class="q-text" style="text-align:center;">' + escapeHtml(data.creatorNickname) + "의 관계 리포트</div>" +
+      '<p class="banner">지금까지 <b>' + data.attemptCount + "명</b>이 나를 맞혀봤어요 · 평균 이해도 <b>" + report.avgScore + "%</b>" +
+      (report.topNickname
+        ? " · 나를 제일 잘 아는 사람 <b>" + escapeHtml(report.topNickname) + " " + report.topScore + "%</b>"
         : "") +
-      miscountHtml +
+      "</p>";
+
+    var rankingSection =
+      data.ranking && data.ranking.length
+        ? '<div class="section-title">' + escapeHtml(data.creatorNickname) + "를 제일 잘 아는 사람 TOP3</div>" + rankingHtml(data.ranking.slice(0, 3))
+        : "";
+
+    var knownSection = "";
+    if (report.knownCategories.length || report.unknownCategories.length) {
+      knownSection =
+        '<div class="section-title">사람들이 잘 아는 나 vs 잘 모르는 나</div>' +
+        '<div class="know-compare">' +
+        '<div class="know-col know-good"><div class="know-col-title">잘 아는 나</div>' +
+        report.knownCategories.map(function (c) {
+          return '<div class="know-item"><span>' + escapeHtml(c.label) + "</span><b>" + c.rate + "%</b></div>";
+        }).join("") +
+        "</div>" +
+        '<div class="know-col know-bad"><div class="know-col-title">잘 모르는 나</div>' +
+        report.unknownCategories.map(function (c) {
+          return '<div class="know-item"><span>' + escapeHtml(c.label) + "</span><b>" + c.rate + "%</b></div>";
+        }).join("") +
+        "</div>" +
+        "</div>";
+    }
+
+    var misHtml = "";
+    if (report.misunderstandings.length) {
+      misHtml =
+        '<div class="section-title">친구들의 공통 오해</div>' +
+        report.misunderstandings.map(function (m) {
+          return (
+            '<div class="advice-bubble advice-partner">' +
+            '<span class="advice-name">총 ' + m.total + "명 중 " + m.count + "명이 이렇게 예상했어요</span>“" +
+            escapeHtml(m.guessedAnswer) + "”" +
+            '<span class="reveal-line">근데 실제 내 답은 “<b>' + escapeHtml(m.actualAnswer) + "</b>”이었어요.</span>" +
+            "</div>"
+          );
+        }).join("") +
+        '<p class="mini-note" style="opacity:1;">생각보다 아무도 모르고 있던 나</p>';
+    }
+
+    var hardestHtml = "";
+    if (report.hardest) {
+      hardestHtml =
+        '<div class="section-title">아무도 잘 모르는 나</div>' +
+        '<div class="advice-bubble advice-partner">' +
+        '<span class="advice-name">' + escapeHtml(report.hardest.category) + "</span>" +
+        escapeHtml(report.hardest.actualAnswer) +
+        '<span class="reveal-line">친구 정답률 ' + report.hardest.ratePercent + "%</span>" +
+        "</div>";
+    }
+
+    var easiestHtml = "";
+    if (report.easiest) {
+      easiestHtml =
+        '<div class="section-title">역시 다 알고 있는 나</div>' +
+        '<div class="advice-bubble advice-me">' +
+        '<span class="advice-name">' + escapeHtml(report.easiest.category) + "</span>" +
+        escapeHtml(report.easiest.actualAnswer) +
+        '<span class="reveal-line">친구 정답률 ' + report.easiest.ratePercent + "% · 숨길 생각도 없었네요</span>" +
+        "</div>";
+    }
+
+    var peopleHtml = "";
+    if (report.people.length) {
+      peopleHtml =
+        '<div class="section-title">사람별 나를 아는 방식</div>' +
+        '<div class="people-grid">' +
+        report.people.map(function (p) {
+          return (
+            '<div class="people-card">' +
+            '<div class="people-top"><span class="people-name">' + escapeHtml(p.nickname) + "</span><span class=\"people-score\">" + p.score + "%</span></div>" +
+            '<div class="people-type">' + escapeHtml(p.type) + "</div>" +
+            '<div class="people-desc">' + escapeHtml(p.typeDesc) + "</div>" +
+            "</div>"
+          );
+        }).join("") +
+        "</div>";
+    }
+
+    var allRankingHtml =
+      data.ranking && data.ranking.length ? '<div class="section-title">전체 참가자</div>' + rankingHtml(data.ranking) : "";
+
+    var ctaHtml =
+      '<div class="section-title">지금 최고 점수는 ' + (report.topScore != null ? report.topScore + "%" : "-") + "</div>" +
+      '<p class="banner">이 점수를 이길 사람이 있을까?</p>' +
+      '<div class="field"><input id="shareUrlInput" type="text" readonly value="' + escapeHtml(shareUrl) + '"/></div>' +
+      '<button class="btn btn-primary cta-pulse-once" id="copyBtn">친구에게 링크 보내기</button>';
+
+    stageEl.innerHTML =
+      newTopHtml +
+      summaryHtml +
+      rankingSection +
+      knownSection +
+      misHtml +
+      hardestHtml +
+      easiestHtml +
+      peopleHtml +
+      allRankingHtml +
+      ctaHtml +
       '<p class="footer-note">이 페이지는 나만 볼 수 있는 페이지예요. 이 링크는 저장해두고, 친구들에겐 위의 공유 링크만 보내주세요.</p>';
     playStageAnim();
 
+    bindOwnerShare(shareUrl, data);
+  }
+
+  function bindOwnerShare(shareUrl, data) {
     var copyBtn = document.getElementById("copyBtn");
     if (copyBtn) {
       copyBtn.addEventListener("click", function () {
         openShareSheet(shareUrl, data.creatorNickname + "가 나를 얼마나 아는지 테스트해봐!");
       });
     }
+  }
+
+  // 최고 점수가 바뀐 걸 감지해서 "새로운 1위 등장" 배너를 짧게 보여줌 (클라이언트 전용, 과한 연출 없이)
+  function newTopBannerHtml(gameId, report) {
+    if (!report.topNickname || report.topScore == null) return "";
+    var key = "myeotdoya_seen_top_" + gameId;
+    var prev = null;
+    try { prev = JSON.parse(localStorage.getItem(key) || "null"); } catch (e) { prev = null; }
+    var html = "";
+    if (prev && (report.topScore > prev.score || (report.topScore === prev.score && report.topNickname !== prev.nickname))) {
+      html =
+        '<div class="banner banner-highlight">' +
+        "<b>새로운 1위 등장!</b><br/>" +
+        escapeHtml(prev.nickname) + " " + prev.score + "% → <b>" + escapeHtml(report.topNickname) + " " + report.topScore + "%</b>" +
+        "</div>";
+    }
+    try { localStorage.setItem(key, JSON.stringify({ nickname: report.topNickname, score: report.topScore })); } catch (e) {}
+    return html;
   }
 
   // ---------- 응답자: 인트로 / 질문 ----------
@@ -423,6 +544,7 @@
       '<p class="result-oneliner" style="text-align:center;font-weight:800;margin:14px 0 4px;">' + escapeHtml(data.creatorNickname) + " 이해도 " + result.score + "%</p>" +
       '<p class="result-oneliner" style="text-align:center;font-size:13.5px;color:var(--ink-2);margin:0 0 18px;line-height:1.6;animation-delay:1.05s;">' + escapeHtml(result.oneLiner) + "</p>" +
       surfaceInnerBarsHtml(result.surfaceScore, result.innerScore) +
+      '<button class="btn btn-ghost" id="shareResultBtn" style="margin-top:6px;">내 결과 공유하기</button>' +
       (showRanking
         ? '<p class="banner" style="margin-top:18px;">이 점수보다 ' + escapeHtml(data.creatorNickname) + '를 더 잘 아는 사람이 있을까?</p>' +
           '<div class="section-title">' + escapeHtml(data.creatorNickname) + '를 제일 잘 아는 사람</div>' + rankingHtml(ranking, nickname)
@@ -465,6 +587,14 @@
     var reverseCta = document.getElementById("reverseCta");
     if (reverseCta) reverseCta.addEventListener("click", function () { track("reverse_challenge_click"); });
 
+    var shareResultBtn = document.getElementById("shareResultBtn");
+    if (shareResultBtn) {
+      shareResultBtn.addEventListener("click", function () {
+        var resultShareUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId);
+        openShareSheet(resultShareUrl, "나는 " + data.creatorNickname + " 테스트에서 " + score + "% 나왔어! 너는 얼마나 알까?");
+      });
+    }
+
     document.getElementById("watchAdBtn").addEventListener("click", function () {
       handleWatchAd(data, result);
     });
@@ -503,7 +633,7 @@
           track("rewarded_ad_complete");
           fetch("/api/attempt-detail?gameId=" + encodeURIComponent(data.gameId) + "&attemptId=" + encodeURIComponent(result.attemptId))
             .then(function (r) { return r.json(); })
-            .then(function (detail) { showUnlockThenReplay(detail); })
+            .then(function (detail) { showUnlockThenReplay(detail, data, result); })
             .catch(function () {
               var b = document.getElementById("adGateBox");
               if (b) b.innerHTML = '<p style="text-align:center;color:var(--warn);">불러오지 못했어요.</p>';
@@ -513,14 +643,14 @@
     }, 360);
   }
 
-  function showUnlockThenReplay(detail) {
+  function showUnlockThenReplay(detail, data, result) {
     var box = document.getElementById("adGateBox");
     if (!box) return;
     box.innerHTML = '<p style="text-align:center;font-weight:800;font-size:16px;color:var(--ink);padding:22px 0;opacity:0;animation:fadeUp .35s ease forwards;">열렸어.</p>';
-    setTimeout(function () { renderReplay(detail); }, 550);
+    setTimeout(function () { renderReplay(detail, data, result); }, 550);
   }
 
-  function renderReplay(detail) {
+  function renderReplay(detail, data, result) {
     track("replay_view");
     var box = document.getElementById("adGateBox");
     if (!box) return;
@@ -604,7 +734,16 @@
       '<div class="section-title">우리가 엇갈린 순간</div>' +
       blocks.join("") +
       qaListHtml +
-      '<p class="mini-note" style="animation-delay:' + (delay + 100) + 'ms;">' + escapeHtml(detail.oneLiner || "") + "</p>";
+      '<p class="mini-note" style="animation-delay:' + (delay + 100) + 'ms;">' + escapeHtml(detail.oneLiner || "") + "</p>" +
+      '<button class="btn btn-ghost" id="shareReplayBtn" style="margin-top:16px;">이 결과 친구에게 공유하기</button>';
+
+    var shareReplayBtn = document.getElementById("shareReplayBtn");
+    if (shareReplayBtn && data && result) {
+      shareReplayBtn.addEventListener("click", function () {
+        var replayShareUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId);
+        openShareSheet(replayShareUrl, "나는 " + data.creatorNickname + " 테스트에서 " + result.score + "% 나왔어! 관계 리플레이까지 다 봤어. 너도 해볼래?");
+      });
+    }
   }
 
   // ---------- 공통 헬퍼 ----------
