@@ -446,6 +446,7 @@ body.depth-3 { background: var(--bg-depth-3); }
 .lb-ellipsis { text-align: center; font-size: 13px; font-weight: 800; color: var(--ink-muted); letter-spacing: 2px; padding: 2px 0; }
 .lb-my-rank { text-align: center; font-size: 13px; font-weight: 700; color: var(--pink); margin-top: 10px; }
 .lb-total { text-align: center; font-size: 11.5px; color: var(--ink-muted); margin-top: 10px; }
+.lb-trait { display: block; font-size: 11px; font-weight: 600; color: var(--ink-muted); margin-top: 2px; white-space: normal; line-height: 1.4; }
 
 /* readable report sections */
 .report-section { margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
@@ -560,6 +561,41 @@ body.depth-3 { background: var(--bg-depth-3); }
   animation: fadeUp .4s ease;
 }
 .banner-highlight b { color: #fff; }
+
+/* 재방문 시 "지난번 이후 뭐가 달라졌는지" 배너 */
+.change-banner {
+  background: var(--ink); color: #fff; border-radius: 16px; padding: 16px 18px;
+  margin-bottom: 18px; opacity: 0; animation: fadeUp .4s ease forwards;
+}
+.change-banner-title { font-size: 14.5px; font-weight: 800; margin-bottom: 8px; line-height: 1.5; }
+.change-list { margin: 0; padding-left: 18px; font-size: 13px; font-weight: 600; line-height: 1.7; color: rgba(255,255,255,.88); }
+.change-list li { margin-bottom: 2px; }
+
+/* 역도전 양쪽 다 완료했을 때: 우리 서로 이해도 */
+.mutual-card {
+  background: linear-gradient(160deg, var(--pink-tint), #ffffff);
+  border: 1px solid var(--pink-soft); border-radius: 18px; padding: 18px 18px 16px;
+  margin-bottom: 18px; text-align: center;
+  opacity: 0; animation: fadeUp .4s ease forwards;
+}
+.mutual-title { font-size: 13px; font-weight: 800; color: var(--ink-muted); margin-bottom: 10px; }
+.mutual-scores { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.mutual-score-col { flex: 1; max-width: 140px; }
+.mutual-score-num { font-size: 26px; font-weight: 800; color: var(--pink); line-height: 1.1; }
+.mutual-score-label { font-size: 11.5px; font-weight: 700; color: var(--ink-2); margin-top: 4px; line-height: 1.4; }
+.mutual-avg { font-size: 13.5px; font-weight: 800; color: var(--ink); margin-top: 14px; }
+.mutual-compare { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-top: 8px; line-height: 1.6; }
+
+/* 결과 화면: "그런데 반대로..." 역도전 유도 문구 (line2가 0.4초 늦게 나타남) */
+.reverse-beat { margin-top: 22px; text-align: center; }
+.reverse-beat-line1 {
+  font-size: 14px; font-weight: 700; color: var(--ink); line-height: 1.6;
+  opacity: 0; animation: fadeUp .4s ease forwards; animation-delay: .15s;
+}
+.reverse-beat-line2 {
+  font-size: 15.5px; font-weight: 800; color: var(--pink); line-height: 1.5; margin-top: 6px;
+  opacity: 0; animation: fadeUp .4s ease forwards; animation-delay: .55s;
+}
 
 /* 관계 리포트: 잘 아는 나 vs 잘 모르는 나 */
 .know-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
