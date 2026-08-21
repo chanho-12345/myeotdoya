@@ -141,34 +141,131 @@ module.exports = async function handler(req, res) {
         avgScore = ranking.length ? Math.round(ranking.reduce((s, r) => s + r.score, 0) / ranking.length) : 0;
       }
 
-      // 사람별 "나를 아는 방식" — 실제 카테고리 정답 데이터로만 타입을 정함(추측 금지)
-      const people = idsInOrder
-        .map(function (id) {
-          const a = attemptById[id];
-          if (!a || !a.nickname) return null;
-          const flags = safeParseField(a.correctFlags, []);
-          const catTotal = {}, catCorrect = {};
-          questions.forEach(function (q, qi) {
-            catTotal[q.category] = (catTotal[q.category] || 0) + 1;
-            if (flags[qi]) catCorrect[q.category] = (catCorrect[q.category] || 0) + 1;
-          });
-          const typeInfo = GameCore.typeFromCategoryScores(catCorrect, catTotal);
-          return { nickname: a.nickname, score: Number(a.score || 0), type: typeInfo.type, typeDesc: typeInfo.desc };
-        })
-        .filter(Boolean);
-
       // 문항별 정답률(전체 응답자 기준, miscount 해시로 계산 — 개인 특정 불가)
       const miscountRaw = (await redis.hgetall("game:" + gameId + ":miscount")) || {};
       const perQ = questions.map(function (q, i) {
         const miss = Number(miscountRaw["q" + i] || 0);
-        const correct = Math.max(0, attemptCount - miss);
+        const correctCount = Math.max(0, attemptCount - miss);
         return {
           idx: i,
           category: q.category,
           label: GameCore.categoryLabel(q.category),
           text: q.text,
           actualAnswer: q.options[creatorAnswers[i]] || "",
-          rate: attemptCount ? correct / attemptCount : 0,
+          missCount: miss,
+          correctCount: correctCount,
+          rate: attemptCount ? correctCount / attemptCount : 0,
+        };
+      });
+
+      // 사람별 카드 — 고정 유형명 대신, 그 사람의 실제 데이터로 만든 한 문장 + 카테고리 비교.
+      // "이 사람만 맞힌 문제"/"이 사람만 다르게 답한 문제"는 집계(correctCount/missCount)가
+      // 정확히 1이고 이 사람이 거기 해당할 때만 나오므로, 다른 사람의 답을 노출하지 않음.
+      const showUnique = attemptCount >= 3;
+      const people = idsInOrder
+        .map(function (id) {
+          const a = attemptById[id];
+          if (!a || !a.nickname) return null;
+          const flags = safeParseField(a.correctFlags, []);
+          const confidence = safeParseField(a.confidence, []);
+          const surfaceScore = a.surfaceScore === "" || a.surfaceScore == null ? null : Number(a.surfaceScore);
+          const innerScore = a.innerScore === "" || a.innerScore == null ? null : Number(a.innerScore);
+          const score = Number(a.score || 0);
+
+          const catTotal = {}, catCorrect = {};
+          let sureCorrect = 0, sureTotal = 0, guessCorrect = 0, guessTotal = 0;
+          let uniqueCorrect = null, uniqueWrong = null;
+          questions.forEach(function (q, qi) {
+            catTotal[q.category] = (catTotal[q.category] || 0) + 1;
+            const ok = !!flags[qi];
+            if (ok) catCorrect[q.category] = (catCorrect[q.category] || 0) + 1;
+            if (confidence[qi] === "sure") { sureTotal += 1; if (ok) sureCorrect += 1; }
+            if (confidence[qi] === "guess") { guessTotal += 1; if (ok) guessCorrect += 1; }
+            if (showUnique) {
+              const pq = perQ[qi];
+              if (pq) {
+                if (ok && pq.correctCount === 1 && !uniqueCorrect) {
+                  uniqueCorrect = { category: pq.label, text: pq.text };
+                }
+                if (!ok && pq.missCount === 1 && !uniqueWrong) {
+                  uniqueWrong = { category: pq.label, text: pq.text };
+                }
+              }
+            }
+          });
+
+          const categories = Object.keys(catTotal).map(function (cat) {
+            const total = catTotal[cat];
+            const correct = catCorrect[cat] || 0;
+            return { category: cat, label: GameCore.categoryLabel(cat), rate: total ? Math.round((correct / total) * 100) : 0 };
+          });
+          categories.sort(function (x, y) { return y.rate - x.rate; });
+          const bestCategory = categories.length ? categories[0] : null;
+          const worstCategory = categories.length ? categories[categories.length - 1] : null;
+
+          const oneLiner = GameCore.personOneLiner({
+            score: score,
+            surfaceScore: surfaceScore,
+            innerScore: innerScore,
+            bestCategory: bestCategory,
+            worstCategory: worstCategory,
+            hasUniqueCorrect: !!uniqueCorrect,
+            sureRate: sureTotal ? sureCorrect / sureTotal : 0,
+            sureTotal: sureTotal,
+            guessRate: guessTotal ? guessCorrect / guessTotal : 0,
+            guessTotal: guessTotal,
+          });
+
+          return {
+            nickname: a.nickname,
+            attemptId: id,
+            score: score,
+            categories: categories,
+            bestCategory: bestCategory,
+            worstCategory: worstCategory,
+            oneLiner: oneLiner,
+            uniqueCorrect: uniqueCorrect,
+            uniqueWrong: uniqueWrong,
+            catCorrect: catCorrect,
+            catTotal: catTotal,
+          };
+        })
+        .filter(Boolean);
+
+      // "사람마다 알고 있는 내가 달라" — 카테고리별로 이 게임 참여자 중 누가 제일 잘 맞혔는지
+      // (3명 이상일 때만 의미가 있어서 그때만 계산)
+      let categoryLeaders = [];
+      if (attemptCount >= 3) {
+        const catKeys = {};
+        questions.forEach(function (q) { catKeys[q.category] = GameCore.categoryLabel(q.category); });
+        categoryLeaders = Object.keys(catKeys)
+          .map(function (cat) {
+            let best = null;
+            people.forEach(function (p) {
+              const total = p.catTotal[cat] || 0;
+              if (!total) return;
+              const rate = (p.catCorrect[cat] || 0) / total;
+              if (!best || rate > best.rate) best = { rate: rate, nickname: p.nickname };
+            });
+            return best ? { category: cat, label: catKeys[cat], nickname: best.nickname, rate: Math.round(best.rate * 100) } : null;
+          })
+          .filter(Boolean)
+          .sort(function (a, b) { return b.rate - a.rate; })
+          .slice(0, 3);
+      }
+
+      // 응답에는 카테고리 집계용 임시 필드(catCorrect/catTotal)는 빼고 내려줌
+      const peopleOut = people.map(function (p) {
+        return {
+          nickname: p.nickname,
+          attemptId: p.attemptId,
+          score: p.score,
+          categories: p.categories,
+          bestCategory: p.bestCategory,
+          worstCategory: p.worstCategory,
+          oneLiner: p.oneLiner,
+          uniqueCorrect: p.uniqueCorrect,
+          uniqueWrong: p.uniqueWrong,
         };
       });
 
@@ -234,7 +331,8 @@ module.exports = async function handler(req, res) {
         avgScore: avgScore,
         topScore: ranking.length ? ranking[0].score : null,
         topNickname: ranking.length ? ranking[0].nickname : null,
-        people: people.slice(0, 10),
+        people: peopleOut.slice(0, 10),
+        categoryLeaders: categoryLeaders,
         knownCategories: knownCategories,
         unknownCategories: unknownCategories,
         misunderstandings: misunderstandings,
