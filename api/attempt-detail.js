@@ -122,6 +122,7 @@ module.exports = async function handler(req, res) {
 
     const surfaceScore = attempt.surfaceScore === "" || attempt.surfaceScore == null ? null : Number(attempt.surfaceScore);
     const innerScore = attempt.innerScore === "" || attempt.innerScore == null ? null : Number(attempt.innerScore);
+    const score = Number(attempt.score || 0);
 
     // 요약(제일 잘 아는 부분 등)만으론 부족하다는 피드백 반영 — 9문제 전부
     // 맞았는지/틀렸는지 + 내 예상/실제 답을 하나하나 다 비교해서 같이 내려줌.
@@ -145,6 +146,13 @@ module.exports = async function handler(req, res) {
       innerScore: innerScore,
       oneLiner: GameCore.relationshipOneLiner(surfaceScore, innerScore),
       perQuestion: perQuestion,
+      // 이 결과를 링크로 공유했을 때, 결과 화면을 처음부터 다시 그릴 수 있도록
+      // 점수/닉네임류도 같이 내려줌 (attempt는 이미 채점이 끝난 본인 시도라 안전함).
+      score: score,
+      scoreCopy: GameCore.scoreCopy(score),
+      title: GameCore.titleForScore(score),
+      creatorNickname: game.creatorNickname,
+      respondentNickname: attempt.nickname,
     });
   } catch (e) {
     res.status(500).json({ error: "server_error", message: e.message });
