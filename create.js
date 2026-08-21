@@ -20,7 +20,19 @@
   var answers = new Array(questions.length).fill(null);
   var subjectivePrompt = "";
   var subjectiveAnswer = "";
-  var step = 0; // 0=닉네임, 1~9=질문(questions[step-1]), 10=주관식, 11=완료/제출
+  var step = 0; // 0=닉네임(또는 역도전 인트로), 1~9=질문(questions[step-1]), 10=주관식, 11=완료/제출
+
+  // "역도전" 진입 여부 — 방금 다른 사람 테스트에 답한 사람이 그 결과 화면에서
+  // "이번엔 내가 맞혀보게 하기"를 눌러 되받아쳐 들어온 경우. 이미 알고 있는 정보
+  // (내 닉네임 / 원본 게임 ID / 원본 시도 ID / 상대 닉네임)를 쿼리로 받아서
+  // 닉네임을 다시 묻지 않고, 완료 후 이 게임을 원본 게임과 연결해서 저장함.
+  var urlParams = new URLSearchParams(location.search);
+  var reverseGameId = urlParams.get("reverseGameId") || "";
+  var reverseAttemptId = urlParams.get("reverseAttemptId") || "";
+  var reverseCreatorNickname = (urlParams.get("reverseCreatorNickname") || "").trim().slice(0, 12);
+  var reversePrefillNickname = (urlParams.get("nickname") || "").trim().slice(0, 12);
+  var isReverse = !!(reverseGameId && reverseAttemptId && reversePrefillNickname);
+  if (isReverse) nickname = reversePrefillNickname;
 
   function escapeHtml(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -54,10 +66,31 @@
   }
 
   function render() {
-    if (step === 0) return renderNickname();
+    if (step === 0) return isReverse ? renderReverseIntro() : renderNickname();
     if (step >= 1 && step <= questions.length) return renderQuestion(step - 1);
     if (step === questions.length + 1) return renderSubjective();
     return renderComplete();
+  }
+
+  // 역도전으로 들어온 경우, 닉네임을 다시 묻는 대신 바로 이 화면을 보여주고
+  // 곧장 질문 생성 흐름으로 들어가게 함.
+  function renderReverseIntro() {
+    progressWrap.style.display = "none";
+    document.body.classList.remove("depth-2", "depth-3");
+    var name = escapeHtml(reverseCreatorNickname || "그 친구");
+    stageEl.innerHTML =
+      '<div class="stage-transition" style="padding:36px 6px 24px;">' +
+      '<p class="stage-transition-text" style="font-weight:800;font-size:19px;">이번엔 네 차례</p>' +
+      '<p class="stage-transition-text" style="animation-delay:.3s;font-size:14px;color:var(--ink-2);margin-top:10px;line-height:1.6;">' +
+      name + "가 널 얼마나 잘 아는지 확인해보자." +
+      "</p>" +
+      "</div>" +
+      '<button class="btn btn-primary cta-pulse-once" id="reverseIntroBtn" style="margin-top:6px;">내 답 만들기 →</button>';
+    playStageAnim();
+    document.getElementById("reverseIntroBtn").addEventListener("click", function () {
+      step = 1;
+      render();
+    });
   }
 
   function renderNickname() {
@@ -361,6 +394,9 @@
         subjectivePrompt: subjectivePrompt,
         subjectiveAnswer: subjectiveAnswer,
         creatorKey: getCreatorKey(),
+        reverseOfGameId: reverseGameId,
+        reverseOfAttemptId: reverseAttemptId,
+        reverseOfCreatorNickname: reverseCreatorNickname,
       }),
     }).then(function (r) { return r.json(); });
 
@@ -373,11 +409,24 @@
         saveCreatorKey(data.creatorKey);
         saveMyTest(data.gameId, data.ownerToken, nickname);
 
+        var completeTitle = isReverse
+          ? "이제 " + escapeHtml(reverseCreatorNickname || "그 친구") + "가 답할 차례예요"
+          : "테스트가 만들어졌어요";
+        var completeSub = isReverse
+          ? "이 링크를 " + escapeHtml(reverseCreatorNickname || "그 친구") + "에게 보내서 답하게 해보세요."
+          : "아래 링크를 친구들에게 보내보세요.";
+        var copyBtnLabel = isReverse
+          ? escapeHtml(reverseCreatorNickname || "그 친구") + "에게 보내기"
+          : "친구에게 보내기";
+        var shareText = isReverse
+          ? nickname + "가 너에 대해 얼마나 알고 있는지 확인해봐!"
+          : nickname + "를 얼마나 아는지 테스트해봐!";
+
         stageEl.innerHTML =
-          '<div class="q-text" style="text-align:center;">테스트가 만들어졌어요</div>' +
-          '<p style="font-size:14px;color:var(--ink-2);text-align:center;margin-top:-8px;">아래 링크를 친구들에게 보내보세요.</p>' +
+          '<div class="q-text" style="text-align:center;">' + completeTitle + "</div>" +
+          '<p style="font-size:14px;color:var(--ink-2);text-align:center;margin-top:-8px;">' + completeSub + "</p>" +
           '<div class="field"><input id="shareUrlInput" type="text" readonly value="' + escapeHtml(shareUrl) + '"/></div>' +
-          '<button class="btn btn-primary cta-pulse-once" id="copyBtn">친구에게 보내기</button>' +
+          '<button class="btn btn-primary cta-pulse-once" id="copyBtn">' + copyBtnLabel + "</button>" +
           '<a class="btn btn-ghost" style="display:block;margin-top:10px;box-sizing:border-box;" href="' + escapeHtml(ownerUrl) + '">내 게임 페이지로 이동 →</a>' +
           '<p class="banner" style="margin-top:16px;">✓ 이 페이지, 자동으로 저장해뒀어요. 나중에 홈 화면 "내가 만든 테스트 보기"에서 언제든 다시 찾을 수 있어요.</p>' +
           '<a class="btn btn-ghost" style="display:block;box-sizing:border-box;" href="./mytests.html">내가 만든 테스트 목록 보기 →</a>' +
@@ -385,7 +434,7 @@
         playStageAnim();
 
         document.getElementById("copyBtn").addEventListener("click", function () {
-          openShareSheet(shareUrl, nickname + "를 얼마나 아는지 테스트해봐!");
+          openShareSheet(shareUrl, shareText);
         });
       })
       .catch(function () {
