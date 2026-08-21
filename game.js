@@ -11,6 +11,7 @@
   var params = new URLSearchParams(location.search);
   var gameId = params.get("token") || "";
   var ownerParam = params.get("owner") || "";
+  var resultParam = params.get("result") || ""; // 친구가 공유한 "결과 보기" 링크 (attemptId)
 
   var KAKAO_JS_KEY = "9571640b8eab8e91dc39c6bc0018e149";
   try {
@@ -81,24 +82,86 @@
     return;
   }
 
-  fetch("/api/game?token=" + encodeURIComponent(gameId) + "&owner=" + encodeURIComponent(ownerParam) + "&clientId=" + encodeURIComponent(clientId))
-    .then(function (r) {
-      if (!r.ok) throw new Error("not_found");
-      return r.json();
-    })
-    .then(function (data) {
-      track("game_open");
-      if (data.isOwner) {
-        renderOwnerView(data);
-      } else if (data.alreadyResponded) {
-        renderResultView(data, data.myAttempt, data.ranking);
-      } else {
-        renderIntro(data);
-      }
-    })
-    .catch(function () {
-      renderError("게임을 찾을 수 없어요. 링크가 정확한지 확인해주세요.");
-    });
+  if (resultParam) {
+    // 친구가 "공유하기"로 보낸 결과 링크 — 테스트를 새로 시작하지 않고, 그 친구의
+    // 점수 + 관계 리플레이 내용을 바로 보여줌.
+    renderSharedResult(gameId, resultParam);
+  } else {
+    fetch("/api/game?token=" + encodeURIComponent(gameId) + "&owner=" + encodeURIComponent(ownerParam) + "&clientId=" + encodeURIComponent(clientId))
+      .then(function (r) {
+        if (!r.ok) throw new Error("not_found");
+        return r.json();
+      })
+      .then(function (data) {
+        track("game_open");
+        if (data.isOwner) {
+          renderOwnerView(data);
+        } else if (data.alreadyResponded) {
+          renderResultView(data, data.myAttempt, data.ranking);
+        } else {
+          renderIntro(data);
+        }
+      })
+      .catch(function () {
+        renderError("게임을 찾을 수 없어요. 링크가 정확한지 확인해주세요.");
+      });
+  }
+
+  // ---------- 공유된 결과 링크 전용 화면 ----------
+  function renderSharedResult(gameId, attemptId) {
+    progressWrap.style.display = "none";
+    resetDepthBg();
+    stageEl.innerHTML = '<div class="analyzing-card"><div class="analyzing"><div class="analyzing-spinner"></div><div class="analyzing-title">불러오는 중...</div></div></div>';
+    playStageAnim();
+
+    fetch("/api/attempt-detail?gameId=" + encodeURIComponent(gameId) + "&attemptId=" + encodeURIComponent(attemptId))
+      .then(function (r) {
+        if (!r.ok) throw new Error("not_found");
+        return r.json();
+      })
+      .then(function (detail) {
+        if (!detail || typeof detail.score !== "number") throw new Error("bad_response");
+        track("shared_result_view");
+
+        var resultShareUrl = location.origin + "/game.html?token=" + encodeURIComponent(gameId) + "&result=" + encodeURIComponent(attemptId);
+        var takeTestUrl = location.origin + "/game.html?token=" + encodeURIComponent(gameId);
+        var tierClass = detail.score >= 100 ? " tier-perfect" : detail.score >= 90 ? " tier-high" : "";
+        var built = buildReplayContentHtml(detail);
+
+        stageEl.innerHTML =
+          '<p class="banner">' + escapeHtml(detail.respondentNickname || "친구") + "님이 " + escapeHtml(detail.creatorNickname || "") + " 테스트에서 받은 결과예요</p>" +
+          '<div class="score-big"><div class="num" id="scoreNum">0%</div><div class="cap">' + escapeHtml(detail.scoreCopy || "") + "</div></div>" +
+          '<div class="connector' + tierClass + '" style="margin:8px 0 6px;"><span class="dot"></span><span class="line"><span class="line-fill" id="scoreLineFill"></span></span><span class="dot"></span></div>' +
+          '<p class="result-oneliner" style="text-align:center;font-size:13.5px;color:var(--ink-2);margin:0 0 18px;line-height:1.6;">' + escapeHtml(detail.oneLiner || "") + "</p>" +
+          surfaceInnerBarsHtml(detail.surfaceScore, detail.innerScore) +
+          built.html +
+          '<p class="mini-note" style="opacity:1;">' + escapeHtml(built.oneLiner) + "</p>" +
+          '<button class="btn btn-ghost" id="shareAgainBtn" style="margin-top:16px;">이 결과 다시 공유하기</button>' +
+          '<div class="cta-fixed"><a class="btn btn-primary" href="' + escapeHtml(takeTestUrl) + '">나도 테스트해볼래 →</a></div>';
+        playStageAnim();
+
+        animateScoreCountUp(detail.score);
+        setTimeout(function () {
+          var f = document.getElementById("scoreLineFill");
+          if (f) f.style.width = Math.max(4, detail.score) + "%";
+        }, 120);
+        setTimeout(function () {
+          Array.prototype.forEach.call(stageEl.querySelectorAll(".stat-fill[data-target]"), function (el) {
+            el.style.width = el.getAttribute("data-target") + "%";
+          });
+        }, 500);
+
+        var shareAgainBtn = document.getElementById("shareAgainBtn");
+        if (shareAgainBtn) {
+          shareAgainBtn.addEventListener("click", function () {
+            openShareSheet(resultShareUrl, (detail.respondentNickname || "친구") + "가 " + (detail.creatorNickname || "") + " 테스트에서 " + detail.score + "% 나왔대! 결과 보러 가기");
+          });
+        }
+      })
+      .catch(function () {
+        renderError("결과를 찾을 수 없어요. 링크가 정확한지 확인해주세요.");
+      });
+  }
 
   // ---------- 생성자 화면: 관계 리포트 ----------
   function renderOwnerView(data) {
@@ -590,8 +653,8 @@
     var shareResultBtn = document.getElementById("shareResultBtn");
     if (shareResultBtn) {
       shareResultBtn.addEventListener("click", function () {
-        var resultShareUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId);
-        openShareSheet(resultShareUrl, "나는 " + data.creatorNickname + " 테스트에서 " + score + "% 나왔어! 너는 얼마나 알까?");
+        var resultShareUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId) + "&result=" + encodeURIComponent(result.attemptId);
+        openShareSheet(resultShareUrl, "나는 " + data.creatorNickname + " 테스트에서 " + score + "% 나왔어! 결과 보러 와줘");
       });
     }
 
@@ -650,11 +713,10 @@
     setTimeout(function () { renderReplay(detail, data, result); }, 550);
   }
 
-  function renderReplay(detail, data, result) {
-    track("replay_view");
-    var box = document.getElementById("adGateBox");
-    if (!box) return;
-
+  // "우리가 엇갈린 순간" 블록 + 전체 문제 비교 리스트를 만드는 공통 로직.
+  // 관계 리플레이 화면(renderReplay)과, 공유된 결과 링크 화면(renderSharedResult)에서
+  // 똑같이 재사용함.
+  function buildReplayContentHtml(detail) {
     var blocks = [];
     var delay = 0;
     var STEP = 150;
@@ -730,18 +792,30 @@
       qaListHtml = '<div class="section-title">전체 문제 비교</div><div class="qa-list">' + qaRows + "</div>";
     }
 
+    return {
+      html: '<div class="section-title">우리가 엇갈린 순간</div>' + blocks.join("") + qaListHtml,
+      oneLiner: detail.oneLiner || "",
+      delay: delay,
+    };
+  }
+
+  function renderReplay(detail, data, result) {
+    track("replay_view");
+    var box = document.getElementById("adGateBox");
+    if (!box) return;
+
+    var built = buildReplayContentHtml(detail);
+
     box.outerHTML =
-      '<div class="section-title">우리가 엇갈린 순간</div>' +
-      blocks.join("") +
-      qaListHtml +
-      '<p class="mini-note" style="animation-delay:' + (delay + 100) + 'ms;">' + escapeHtml(detail.oneLiner || "") + "</p>" +
+      built.html +
+      '<p class="mini-note" style="animation-delay:' + (built.delay + 100) + 'ms;">' + escapeHtml(built.oneLiner) + "</p>" +
       '<button class="btn btn-ghost" id="shareReplayBtn" style="margin-top:16px;">이 결과 친구에게 공유하기</button>';
 
     var shareReplayBtn = document.getElementById("shareReplayBtn");
     if (shareReplayBtn && data && result) {
       shareReplayBtn.addEventListener("click", function () {
-        var replayShareUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId);
-        openShareSheet(replayShareUrl, "나는 " + data.creatorNickname + " 테스트에서 " + result.score + "% 나왔어! 관계 리플레이까지 다 봤어. 너도 해볼래?");
+        var replayShareUrl = location.origin + "/game.html?token=" + encodeURIComponent(data.gameId) + "&result=" + encodeURIComponent(result.attemptId);
+        openShareSheet(replayShareUrl, "나는 " + data.creatorNickname + " 테스트에서 " + result.score + "% 나왔어! 관계 리플레이까지 다 봤어. 결과 보러 와줘");
       });
     }
   }
