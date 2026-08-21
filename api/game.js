@@ -216,6 +216,12 @@ module.exports = async function handler(req, res) {
             guessTotal: guessTotal,
           });
 
+          // TOP3 랭킹 옆에 붙는 짧은 한 줄 — "왜 이 사람이 특별한지"만 압축해서 보여줌
+          let shortTrait = "고르게 잘 아는 사람";
+          if (uniqueCorrect) shortTrait = "남들이 틀린 걸 혼자 맞힘";
+          else if (bestCategory && bestCategory.rate >= 85) shortTrait = bestCategory.label + " 완벽 이해";
+          else if (bestCategory) shortTrait = bestCategory.label + " 강함";
+
           return {
             nickname: a.nickname,
             attemptId: id,
@@ -224,6 +230,7 @@ module.exports = async function handler(req, res) {
             bestCategory: bestCategory,
             worstCategory: worstCategory,
             oneLiner: oneLiner,
+            shortTrait: shortTrait,
             uniqueCorrect: uniqueCorrect,
             uniqueWrong: uniqueWrong,
             catCorrect: catCorrect,
@@ -264,6 +271,7 @@ module.exports = async function handler(req, res) {
           bestCategory: p.bestCategory,
           worstCategory: p.worstCategory,
           oneLiner: p.oneLiner,
+          shortTrait: p.shortTrait,
           uniqueCorrect: p.uniqueCorrect,
           uniqueWrong: p.uniqueWrong,
         };
@@ -303,6 +311,9 @@ module.exports = async function handler(req, res) {
             if (c > bestCount) { bestCount = c; bestOpt = optIdx; }
           });
           if (bestOpt !== -1 && bestCount >= 3) {
+            // 과반 이상이 같은 방향으로 틀렸을 때만 "공통 오해"라고 부르고,
+            // 그보다 약하면 과장하지 않고 "생각이 갈린 질문"으로 톤을 낮춤.
+            const ratio = attemptCount ? bestCount / attemptCount : 0;
             misunderstandings.push({
               category: GameCore.categoryLabel(q.category),
               text: q.text,
@@ -310,6 +321,7 @@ module.exports = async function handler(req, res) {
               actualAnswer: q.options[creatorAnswers[i]] || "",
               count: bestCount,
               total: attemptCount,
+              label: ratio >= 0.5 ? "공통 오해" : "생각이 갈린 질문",
             });
           }
         });
@@ -327,6 +339,62 @@ module.exports = async function handler(req, res) {
         easiest = { category: e.label, text: e.text, actualAnswer: e.actualAnswer, ratePercent: Math.round(e.rate * 100) };
       }
 
+      // "역도전" 상호 결과 — 이 게임이 다른 게임에 대한 되받아치기로 만들어졌고
+      // (game.reverseOfGameId/reverseOfAttemptId), 상대가 이미 답까지 했다면
+      // (attemptCount > 0) 양쪽 이해도를 한 화면에 묶어서 보여줌.
+      let mutual = null;
+      if (game.reverseOfGameId && game.reverseOfAttemptId) {
+        try {
+          const originGame = await redis.hgetall("game:" + game.reverseOfGameId);
+          const originAttempt = await redis.hgetall("attempt:" + game.reverseOfAttemptId);
+          if (originGame && originGame.creatorNickname && originAttempt && originAttempt.gameId === game.reverseOfGameId && peopleOut.length) {
+            const originQuestionIds = safeParseField(originGame.questionIds, []);
+            const originQuestions = GameCore.getQuestionsByIds(originQuestionIds);
+            const originFlags = safeParseField(originAttempt.correctFlags, []);
+            const originCatTotal = {}, originCatCorrect = {};
+            originQuestions.forEach(function (q, qi) {
+              originCatTotal[q.category] = (originCatTotal[q.category] || 0) + 1;
+              if (originFlags[qi]) originCatCorrect[q.category] = (originCatCorrect[q.category] || 0) + 1;
+            });
+            const originCategories = Object.keys(originCatTotal)
+              .map(function (cat) {
+                const total = originCatTotal[cat];
+                const correct = originCatCorrect[cat] || 0;
+                return { category: cat, label: GameCore.categoryLabel(cat), rate: total ? Math.round((correct / total) * 100) : 0 };
+              })
+              .sort(function (a, b) { return b.rate - a.rate; });
+            const originScore = Number(originAttempt.score || 0);
+            const originBestCategory = originCategories.length ? originCategories[0] : null;
+
+            const thisSide = peopleOut[0]; // 역도전 게임의 최고 응답자 = 상대방으로 간주
+            const meNickname = game.creatorNickname;
+            const themNickname = game.reverseOfCreatorNickname || originGame.creatorNickname;
+
+            let comparisonLine = "";
+            if (originBestCategory && thisSide.bestCategory) {
+              const p1 = GameCore.hasBatchim(themNickname) ? "은" : "는";
+              const p2 = GameCore.hasBatchim(originBestCategory.label) ? "을" : "를";
+              const p3 = GameCore.hasBatchim(meNickname) ? "은" : "는";
+              const p4 = GameCore.hasBatchim(thisSide.bestCategory.label) ? "을" : "를";
+              comparisonLine =
+                meNickname + p3 + " " + themNickname + "의 " + originBestCategory.label + p2 + " 더 잘 알고, " +
+                themNickname + p1 + " " + meNickname + "의 " + thisSide.bestCategory.label + p4 + " 더 잘 알고 있어.";
+            }
+
+            mutual = {
+              meNickname: meNickname,
+              themNickname: themNickname,
+              meUnderstandsThemScore: originScore,
+              themUnderstandsMeScore: thisSide.score,
+              mutualScore: Math.round((originScore + thisSide.score) / 2),
+              comparisonLine: comparisonLine,
+            };
+          }
+        } catch (e) {
+          mutual = null;
+        }
+      }
+
       report = {
         avgScore: avgScore,
         topScore: ranking.length ? ranking[0].score : null,
@@ -338,6 +406,10 @@ module.exports = async function handler(req, res) {
         misunderstandings: misunderstandings,
         hardest: hardest,
         easiest: easiest,
+        mutual: mutual,
+        questionStats: perQ.map(function (pq) {
+          return { idx: pq.idx, category: pq.category, label: pq.label, correctCount: pq.correctCount, missCount: pq.missCount };
+        }),
       };
     }
 
