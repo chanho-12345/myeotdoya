@@ -51,7 +51,7 @@ module.exports = async function handler(req, res) {
         const title = nickname + "를 얼마나 잘 알고 있어? — 누가날알까";
         const desc =
           "내가 먼저 답을 골라놨어. 얼마나 맞히는지 볼까? 10문제, 1분." +
-          (attemptCount > 0 ? " 지금까지 " + attemptCount + "명이 도전했어요." : "");
+          (attemptCount > 0 ? " 지금까지 " + attemptCount + "명이 참여했어요." : "");
         const imageUrl = "https://myeotdoya.vercel.app/og-image.png";
         const safeTitle = escapeHtml(title);
         const safeDesc = escapeHtml(desc);
